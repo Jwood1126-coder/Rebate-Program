@@ -1,0 +1,58 @@
+{
+  "name": "rebate-program",
+  "version": "1.0.0",
+  "description": "Brennan Industries Rebate Management System",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "npx tsx prisma/seed.ts",
+    "db:studio": "prisma studio"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jwood1126-coder/Rebate-Program.git"
+  },
+  "keywords": [],
+  "author": "Brennan Industries",
+  "license": "ISC",
+  "dependencies": {
+    "@hookform/resolvers": "^5.2.2",
+    "@prisma/client": "^6.19.2",
+    "@tailwindcss/postcss": "^4.2.1",
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "autoprefixer": "^10.4.27",
+    "bcryptjs": "^3.0.3",
+    "date-fns": "^4.1.0",
+    "exceljs": "^4.4.0",
+    "next": "^16.1.6",
+    "next-auth": "^5.0.0-beta.30",
+    "postcss": "^8.5.8",
+    "prisma": "^6.19.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-hook-form": "^7.71.2",
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.9.3",
+    "uuid": "^13.0.0",
+    "xlsx": "^0.18.5",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@eslint/compat": "^2.0.3",
+    "@eslint/eslintrc": "^3.3.5",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/uuid": "^10.0.0",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.1.6",
+    "tsx": "^4.21.0",
+    "vitest": "^4.1.0"
+  }
+}

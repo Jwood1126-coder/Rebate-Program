@@ -1,0 +1,255 @@
+// Rebate Management System - Database Schema
+// See docs/SYSTEM_DESIGN.md Section 5 for design rationale.
+//
+// Key relationships:
+//   Distributor -> Contract (scoped to end user) -> Rebate Plan -> Rebate Record <- Item
+//
+// Rebate ID in the spreadsheet = distributor code (e.g., "FAS" = Fastenal).
+// One contract per end user, unique to a distributor.
+// Rebate price is per-unit dollar amount (e.g., $0.30).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// DISTRIBUTORS (called "Rebate ID" or "Customer ID" in spreadsheets)
+// ---------------------------------------------------------------------------
+// Primary business entity. The rebate is paid to the distributor.
+// Examples: FAS (Fastenal), MOTION, HSC, AIT, LGG, TIPCO
+model Distributor {
+  id               Int        @id @default(autoincrement())
+  code             String     @unique @db.VarChar(50) // Business key: FAS, HSC, MOTION
+  name             String     @db.VarChar(255)        // Display name: Fastenal, Motion Industries
+  externalCrmId    String?    @map("external_crm_id") @db.VarChar(100)
+  isActive         Boolean    @default(true) @map("is_active")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  contracts        Contract[]
+
+  @@map("distributors")
+}
+
+// ---------------------------------------------------------------------------
+// END USERS
+// ---------------------------------------------------------------------------
+// The end user is the reason the rebate exists — "we rebate Fastenal because
+// they sell to Link-Belt." One contract per end user per distributor.
+model EndUser {
+  id               Int        @id @default(autoincrement())
+  code             String     @unique @db.VarChar(50) // Business key
+  name             String     @db.VarChar(255)
+  externalCrmId    String?    @map("external_crm_id") @db.VarChar(100)
+  isActive         Boolean    @default(true) @map("is_active")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  contracts        Contract[]
+
+  @@map("end_users")
+}
+
+// ---------------------------------------------------------------------------
+// CONTRACTS
+// ---------------------------------------------------------------------------
+// One contract per distributor + end user combination.
+// Example: Contract 101700 = Fastenal selling to Link-Belt (specifically OSW products)
+model Contract {
+  id               Int          @id @default(autoincrement())
+  distributorId    Int          @map("distributor_id")
+  endUserId        Int          @map("end_user_id")
+  contractNumber   String       @map("contract_number") @db.VarChar(100)
+  description      String?      @db.VarChar(500)
+  startDate        DateTime?    @map("start_date") @db.Date
+  endDate          DateTime?    @map("end_date") @db.Date
+  status           String       @default("active") @db.VarChar(20) // active, expired, cancelled
+  externalErpId    String?      @map("external_erp_id") @db.VarChar(100)
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+
+  distributor      Distributor  @relation(fields: [distributorId], references: [id])
+  endUser          EndUser      @relation(fields: [endUserId], references: [id])
+  rebatePlans      RebatePlan[]
+
+  @@unique([distributorId, endUserId, contractNumber])
+  @@index([distributorId])
+  @@index([endUserId])
+  @@map("contracts")
+}
+
+// ---------------------------------------------------------------------------
+// REBATE PLANS
+// ---------------------------------------------------------------------------
+// A rebate program within a contract. Plan ID from spreadsheet (e.g., "OSW").
+// Discount type is exclusive: 'part' or 'product_code', never both.
+model RebatePlan {
+  id               Int            @id @default(autoincrement())
+  contractId       Int            @map("contract_id")
+  planCode         String         @map("plan_code") @db.VarChar(100) // Business key: OSW, etc.
+  planName         String?        @map("plan_name") @db.VarChar(255)
+  discountType     String         @map("discount_type") @db.VarChar(20) // 'part' or 'product_code'
+  status           String         @default("active") @db.VarChar(20) // active, expired, cancelled
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  contract         Contract       @relation(fields: [contractId], references: [id])
+  rebateRecords    RebateRecord[]
+
+  @@unique([contractId, planCode])
+  @@map("rebate_plans")
+}
+
+// ---------------------------------------------------------------------------
+// ITEMS
+// ---------------------------------------------------------------------------
+// Part numbers / SKUs. Shared across all distributors.
+// Example: 0304-C-04
+model Item {
+  id               Int            @id @default(autoincrement())
+  itemNumber       String         @unique @map("item_number") @db.VarChar(100)
+  description      String?        @map("item_description") @db.VarChar(500)
+  productCode      String?        @map("product_code") @db.VarChar(100) // Category grouping
+  externalErpId    String?        @map("external_erp_id") @db.VarChar(100)
+  isActive         Boolean        @default(true) @map("is_active")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  rebateRecords    RebateRecord[]
+
+  @@index([productCode])
+  @@map("items")
+}
+
+// ---------------------------------------------------------------------------
+// REBATE RECORDS
+// ---------------------------------------------------------------------------
+// The core table. Each row: "For this plan + item, this rebate price applies
+// during this date range."
+// Example: Plan OSW, Item 0304-C-04, $0.30/unit, 11/1/2023 - 12/31/2026
+model RebateRecord {
+  id               Int            @id @default(autoincrement())
+  rebatePlanId     Int            @map("rebate_plan_id")
+  itemId           Int            @map("item_id")
+  rebatePrice      Decimal        @map("rebate_price") @db.Decimal(12, 4)
+  startDate        DateTime       @map("start_date") @db.Date
+  endDate          DateTime?      @map("end_date") @db.Date
+  status           String         @default("active") @db.VarChar(20)
+  // Versioning chain
+  supersededById   Int?           @unique @map("superseded_by_id")
+  supersededBy     RebateRecord?  @relation("SupersessionChain", fields: [supersededById], references: [id])
+  supersedes       RebateRecord?  @relation("SupersessionChain")
+  // Tracking
+  importBatchId    Int?           @map("import_batch_id")
+  createdById      Int            @map("created_by_id")
+  updatedById      Int            @map("updated_by_id")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  rebatePlan       RebatePlan     @relation(fields: [rebatePlanId], references: [id])
+  item             Item           @relation(fields: [itemId], references: [id])
+  importBatch      ImportBatch?   @relation(fields: [importBatchId], references: [id])
+  createdBy        User           @relation("RecordCreatedBy", fields: [createdById], references: [id])
+  updatedBy        User           @relation("RecordUpdatedBy", fields: [updatedById], references: [id])
+  notes            RecordNote[]
+
+  @@unique([rebatePlanId, itemId, startDate])
+  @@index([rebatePlanId, itemId])
+  @@index([status])
+  @@index([importBatchId])
+  @@map("rebate_records")
+}
+
+// ---------------------------------------------------------------------------
+// RECORD NOTES
+// ---------------------------------------------------------------------------
+// Replaces the "Comment" column with timestamped, attributed notes.
+model RecordNote {
+  id               Int          @id @default(autoincrement())
+  rebateRecordId   Int          @map("rebate_record_id")
+  noteType         String       @default("general") @map("note_type") @db.VarChar(50)
+  noteText         String       @map("note_text")
+  createdById      Int          @map("created_by_id")
+  createdAt        DateTime     @default(now()) @map("created_at")
+
+  rebateRecord     RebateRecord @relation(fields: [rebateRecordId], references: [id])
+  createdBy        User         @relation(fields: [createdById], references: [id])
+
+  @@index([rebateRecordId])
+  @@map("record_notes")
+}
+
+// ---------------------------------------------------------------------------
+// AUDIT LOG
+// ---------------------------------------------------------------------------
+// Immutable, append-only. Every write on business tables generates an entry.
+// See docs/SYSTEM_DESIGN.md Appendix C for format specification.
+model AuditLog {
+  id               BigInt       @id @default(autoincrement())
+  tableName        String       @map("table_name") @db.VarChar(100)
+  recordId         Int          @map("record_id")
+  action           String       @db.VarChar(20) // INSERT, UPDATE, DELETE
+  changedFields    Json         @map("changed_fields") @db.JsonB
+  userId           Int          @map("user_id")
+  ipAddress        String?      @map("ip_address") @db.VarChar(45)
+  createdAt        DateTime     @default(now()) @map("created_at")
+
+  user             User         @relation(fields: [userId], references: [id])
+
+  @@index([tableName, recordId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_log")
+}
+
+// ---------------------------------------------------------------------------
+// IMPORT BATCHES
+// ---------------------------------------------------------------------------
+// Tracks every spreadsheet import for traceability.
+model ImportBatch {
+  id               Int            @id @default(autoincrement())
+  fileName         String         @map("file_name") @db.VarChar(500)
+  fileHash         String?        @map("file_hash") @db.VarChar(128)
+  distributorId    Int?           @map("distributor_id")
+  totalRows        Int            @default(0) @map("total_rows")
+  importedCount    Int            @default(0) @map("imported_count")
+  skippedCount     Int            @default(0) @map("skipped_count")
+  errorCount       Int            @default(0) @map("error_count")
+  status           String         @default("pending") @db.VarChar(20)
+  importedById     Int            @map("imported_by_id")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  completedAt      DateTime?      @map("completed_at")
+
+  importedBy       User           @relation(fields: [importedById], references: [id])
+  rebateRecords    RebateRecord[]
+
+  @@map("import_batches")
+}
+
+// ---------------------------------------------------------------------------
+// USERS
+// ---------------------------------------------------------------------------
+model User {
+  id               Int            @id @default(autoincrement())
+  username         String         @unique @db.VarChar(100)
+  displayName      String         @map("display_name") @db.VarChar(255)
+  email            String         @db.VarChar(255)
+  passwordHash     String         @map("password_hash") @db.VarChar(255)
+  role             String         @db.VarChar(50) // admin, rebate_manager, viewer
+  isActive         Boolean        @default(true) @map("is_active")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  auditLogs        AuditLog[]
+  recordNotes      RecordNote[]
+  importBatches    ImportBatch[]
+  createdRecords   RebateRecord[] @relation("RecordCreatedBy")
+  updatedRecords   RebateRecord[] @relation("RecordUpdatedBy")
+
+  @@map("users")
+}

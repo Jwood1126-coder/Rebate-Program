@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+/*
+ * Brennan Industries brand system
+ * Primary: #006293 (Brennan Blue)
+ * Dark:    #003F78
+ * Text:    #333333
+ * Border:  #C7C8CA
+ * Light:   #EBEBEB
+ * White:   #FFFFFF
+ */
+
+@theme {
+  --color-brennan-blue: #006293;
+  --color-brennan-dark: #003F78;
+  --color-brennan-light: #EBEBEB;
+  --color-brennan-border: #C7C8CA;
+  --color-brennan-text: #333333;
+
+  --color-status-active: #16a34a;
+  --color-status-expired: #6b7280;
+  --color-status-future: #2563eb;
+  --color-status-superseded: #ea580c;
+  --color-status-draft: #ca8a04;
+  --color-status-cancelled: #dc2626;
+}
+
+body {
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--color-brennan-text);
+  background: #f8f9fa;
+}
+
+/* Scrollbar styling for data-heavy views */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-brennan-light);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-brennan-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #999;
+}

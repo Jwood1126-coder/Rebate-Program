@@ -1,0 +1,23 @@
+// Validation rule codes. Stable identifiers — once assigned, a code always
+// means the same thing. See docs/SYSTEM_DESIGN.md Appendix C for full catalog.
+
+export const VALIDATION_CODES = {
+  PRICE_REQUIRED: "VAL-001",
+  START_DATE_REQUIRED: "VAL-002",
+  END_DATE_BEFORE_START: "VAL-003",
+  CONTRACT_REQUIRED: "VAL-004",
+  ITEM_REQUIRED: "VAL-005",
+  DUPLICATE_RECORD: "VAL-006",
+  OVERLAPPING_DATES: "VAL-007",
+  RETROACTIVE_START: "VAL-008",
+  NO_END_DATE: "VAL-009",
+  ITEM_NOT_FOUND: "VAL-010",
+  FAR_FUTURE_END: "VAL-011",
+  SUPERSEDES_RECORD: "VAL-012",
+  DISTRIBUTOR_REQUIRED: "VAL-013",
+  EXPIRED_CONTRACT: "VAL-014",
+  INVALID_DISCOUNT_TYPE: "VAL-015",
+  PLAN_REQUIRED: "VAL-016",
+} as const;
+
+export type ValidationCode = (typeof VALIDATION_CODES)[keyof typeof VALIDATION_CODES];
