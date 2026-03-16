@@ -1218,10 +1218,10 @@ See `docs/RECONCILIATION_DESIGN.md` Section 6 for full exception category defini
 | `VAL-007` | Error | "Overlapping dates: this record overlaps with Record #{{id}} for the same plan and item." | **[IMPLEMENTED]** |
 | `VAL-008` | Warning | "Start date is in the past. This record will have a retroactive effective date." | **[IMPLEMENTED]** |
 | `VAL-009` | Warning | "No end date specified. This record will remain active indefinitely." | **[IMPLEMENTED]** |
-| `VAL-010` | Warning | "This item number does not exist in the system. It will be created automatically." | **[PLANNED]** — for import pipeline |
+| `VAL-010` | Warning | "This item number does not exist in the system. It will be created automatically." | **[PLANNED]** — for claim reconciliation |
 | `VAL-011` | Warning | "End date is more than 5 years in the future. Please verify this is correct." | **[IMPLEMENTED]** |
 | `VAL-012` | Info | "This record supersedes Record #{{id}}, which will be marked as superseded." | **[PLANNED]** — for supersede workflow |
-| `VAL-013` | Error | "Distributor is required. Each record must be associated with a distributor." | **[PLANNED]** — for import pipeline |
+| `VAL-013` | Error | "Distributor is required. Each record must be associated with a distributor." | **[PLANNED]** — for claim reconciliation |
 | `VAL-014` | Warning | "This contract has an expired status. Adding records to an expired contract may indicate a data issue." | **[IMPLEMENTED]** |
 
 > **Code change note**: VAL-004 was "Contract number is required" in the original; implemented as "Rebate plan is required" since the API accepts `rebatePlanId` directly (the plan implies the contract and distributor). VAL-013 was "Customer is required"; updated to "Distributor is required".

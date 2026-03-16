@@ -338,18 +338,18 @@ Validation is the single most important feature that distinguishes this system f
 
 ---
 
-## 11. Import/Export Philosophy
+## 11. Data Ingestion and Export Philosophy
 
-### Import: The Boundary Crossing
+### Claim Reconciliation: The Primary Ingestion Path
 
-Importing a spreadsheet is the most dangerous operation in this system. Spreadsheet data is unvalidated, inconsistently formatted, potentially duplicated, and may contain assumptions that don't match the data model. For the detailed import pipeline steps and import batch statuses, see `docs/SYSTEM_DESIGN.md` Section 4.4 and Appendix C.
+External data enters this system through the **monthly claim reconciliation workflow** — distributors submit claim files that are staged, validated against stored contract terms, and reviewed by staff before any changes reach live records. See `docs/RECONCILIATION_DESIGN.md` for the complete design.
 
 **Behavioral rules for Claude:**
-- Imports never bypass validation. Same rules as manual entry.
-- Imports create records; they never silently overwrite existing ones. Duplicates are flagged for user decision.
-- Column mappings are explicit and reviewable, not magic.
+- Claim files are staged and validated — they never write directly to `rebate_records`.
+- Per-distributor column mappings are explicit and reviewable, not magic.
 - The original file is stored/referenced for traceability.
-- When editing import code, test with messy real-world data: missing columns, extra columns, empty rows, bad dates, Unicode, large files.
+- When editing reconciliation/staging code, test with messy real-world data: missing columns, extra columns, empty rows, bad dates, Unicode, large files.
+- The reconciliation engine is an exception/review tool — it surfaces discrepancies for human decision, never auto-corrects.
 
 ### Export: The Read Projection
 
@@ -402,13 +402,13 @@ For screen designs and wireframes, see `docs/SYSTEM_DESIGN.md` Section 9.
 ### Behavioral Rules for Claude
 
 - **Test business rules, not implementation details.** Test that "overlapping dates are rejected," not that a private function returns a specific shape.
-- **Test imports with real-world messy data.** Fixtures with: missing columns, extra columns, empty rows, inconsistent dates, Unicode, large files.
+- **Test claim file parsing with real-world messy data.** Fixtures with: missing columns, extra columns, empty rows, inconsistent dates, Unicode, large files.
 - **Date-dependent tests must not depend on the current date.** Inject or mock "today."
 - **Audit log tests verify content, not just existence.** Check that `changed_fields` JSON has correct old/new values.
 - **Test validation through the same entry point as production.** If the API calls `validationService.validate()`, so should the test.
 - **Cover edge cases aggressively.** Date boundaries (today = start, today = end), null end dates, leap years, same-day start/end, superseded exclusion from overlap checks.
 - **Unit tests for:** validation rules, status derivation, overlap/duplicate detection, date logic.
-- **Integration tests for:** supersede workflow, CRUD, import pipeline, audit logging, API endpoints, authorization.
+- **Integration tests for:** supersede workflow, CRUD, claim reconciliation pipeline, audit logging, API endpoints, authorization.
 
 ---
 
@@ -540,15 +540,15 @@ Every decision should be made as if you will maintain, debug, and extend this co
 - [ ] Confirm consistency with business rules
 - [ ] Ensure the validation service is the single source of truth
 - [ ] Test positive, negative, and edge cases
-- [ ] Verify the import pipeline respects the change
+- [ ] Verify the claim reconciliation pipeline respects the change
 
-### Before Editing Import Code
+### Before Editing Reconciliation Code
 
-- [ ] Read the full import pipeline
-- [ ] Test with messy data (missing columns, bad dates, duplicates)
-- [ ] Ensure imports go through standard validation
-- [ ] Ensure records are tagged with `import_batch_id`
-- [ ] Verify preview shows accurate error/warning counts
+- [ ] Read the full reconciliation pipeline (staging, validation, review, commit)
+- [ ] Test with messy claim data (missing columns, bad dates, duplicates)
+- [ ] Ensure claim validation uses the same rules as manual entry where applicable
+- [ ] Ensure staged rows are linked to their claim batch for traceability
+- [ ] Verify exception review shows accurate error/warning counts
 
 ### Before Changing Status Logic
 
