@@ -34,8 +34,28 @@ export const COLUMN_MAPPINGS: Record<string, ColumnMapping> = {
     skipColumns: [],
   },
 
+  MOTION: {
+    distributorCode: 'MOTION',
+    name: 'Motion Industries Claim File',
+    mappings: {
+      contractNumber: 'Brennan Contract #',
+      itemNumber: 'Brennan PN',
+      transactionDate: 'Ship Date',
+      deviatedPrice: 'Special Price',
+      quantity: 'Qty Shipped',
+      claimedAmount: 'Rebate Amount',
+      standardPrice: 'List Price',
+      endUserCode: 'End User ID',
+      endUserName: 'End User Name',
+      distributorItemNumber: 'Motion PN',
+      distributorOrderNumber: 'Purchase Order #',
+      itemDescription: 'Part Description',
+    },
+    dateFormat: 'M/d/yyyy',
+  },
+
   // Additional distributor mappings will be added here as sample files are received.
-  // Expected: MOTION, HSC, AIT, LGG, TIPCO
+  // Expected: HSC, AIT, LGG, TIPCO
 };
 
 /**

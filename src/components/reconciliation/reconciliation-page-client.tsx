@@ -36,6 +36,25 @@ interface ParseResult {
   errors?: string[];
 }
 
+interface ValidationIssue {
+  code: string;
+  severity: string;
+  category: string;
+  description: string;
+  rowNumber: number;
+  suggestedAction: string;
+}
+
+interface ValidationResult {
+  success: boolean;
+  runId: number;
+  totalRows: number;
+  validatedCount: number;
+  exceptionCount: number;
+  matchedCount: number;
+  issues: ValidationIssue[];
+}
+
 const configuredDistributors = getConfiguredDistributors();
 
 export default function ReconciliationPageClient({
@@ -55,6 +74,10 @@ export default function ReconciliationPageClient({
   const [claimPeriod, setClaimPeriod] = useState<string>(getDefaultPeriod());
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Validation state
+  const [validating, setValidating] = useState<number | null>(null); // runId being validated
+  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
 
   const selectedDistributor = distributors.find(d => d.id === Number(selectedDistributorId));
   const hasMapping = selectedDistributor ? configuredDistributors.includes(selectedDistributor.code) : false;
@@ -80,11 +103,7 @@ export default function ReconciliationPageClient({
 
       if (res.ok) {
         setUploadResult({ success: true, parseResult: data.parseResult });
-        // Refresh runs list
-        const runsRes = await fetch("/api/reconciliation/runs");
-        if (runsRes.ok) {
-          setRuns(await runsRes.json());
-        }
+        await refreshRuns();
       } else {
         setUploadResult({
           success: false,
@@ -96,6 +115,36 @@ export default function ReconciliationPageClient({
       setUploadResult({ success: false, error: "Network error. Please try again." });
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleValidate(runId: number) {
+    setValidating(runId);
+    setValidationResult(null);
+
+    try {
+      const res = await fetch(`/api/reconciliation/runs/${runId}/validate`, {
+        method: "POST",
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        setValidationResult(data);
+        await refreshRuns();
+      } else {
+        setValidationResult(null);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setValidating(null);
+    }
+  }
+
+  async function refreshRuns() {
+    const runsRes = await fetch("/api/reconciliation/runs");
+    if (runsRes.ok) {
+      setRuns(await runsRes.json());
     }
   }
 
@@ -244,6 +293,82 @@ export default function ReconciliationPageClient({
         </div>
       )}
 
+      {/* Validation Results Panel */}
+      {validationResult && (
+        <div className="rounded-xl border border-brennan-border bg-white shadow-sm">
+          <div className="border-b border-brennan-border px-5 py-3 flex items-center justify-between">
+            <h2 className="text-base font-semibold text-brennan-text">
+              Validation Results — Run #{validationResult.runId}
+            </h2>
+            <button
+              onClick={() => setValidationResult(null)}
+              className="text-xs text-gray-400 hover:text-gray-600"
+            >
+              Dismiss
+            </button>
+          </div>
+
+          <div className="px-5 py-4">
+            {/* Summary cards */}
+            <div className="grid grid-cols-4 gap-4 mb-4">
+              <SummaryCard label="Total Rows" value={validationResult.totalRows} />
+              <SummaryCard label="Matched" value={validationResult.matchedCount} color="green" />
+              <SummaryCard label="Exceptions" value={validationResult.exceptionCount} color={validationResult.exceptionCount > 0 ? "amber" : "green"} />
+              <SummaryCard
+                label="Clean Rate"
+                value={validationResult.totalRows > 0
+                  ? `${Math.round((validationResult.matchedCount / validationResult.totalRows) * 100)}%`
+                  : "—"}
+                color={validationResult.matchedCount === validationResult.totalRows ? "green" : "amber"}
+              />
+            </div>
+
+            {/* Exception list */}
+            {validationResult.issues.length > 0 && (
+              <div>
+                <h3 className="text-sm font-medium text-gray-700 mb-2">
+                  Exceptions ({validationResult.issues.length})
+                </h3>
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-gray-50 text-left text-gray-500 uppercase tracking-wider">
+                        <th className="px-3 py-2">Row</th>
+                        <th className="px-3 py-2">Code</th>
+                        <th className="px-3 py-2">Severity</th>
+                        <th className="px-3 py-2">Category</th>
+                        <th className="px-3 py-2">Description</th>
+                        <th className="px-3 py-2">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {validationResult.issues.map((issue, idx) => (
+                        <tr key={idx} className="hover:bg-gray-50/50">
+                          <td className="px-3 py-2 font-mono">{issue.rowNumber}</td>
+                          <td className="px-3 py-2 font-mono font-medium">{issue.code}</td>
+                          <td className="px-3 py-2">
+                            <SeverityBadge severity={issue.severity} />
+                          </td>
+                          <td className="px-3 py-2 font-medium text-gray-700">{issue.category}</td>
+                          <td className="px-3 py-2 text-gray-600 max-w-md">{issue.description}</td>
+                          <td className="px-3 py-2 text-gray-500">{issue.suggestedAction}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {validationResult.issues.length === 0 && (
+              <div className="text-center py-6">
+                <p className="text-sm font-medium text-green-700">All claim lines validated successfully — no exceptions found.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Reconciliation Runs Table */}
       <div className="rounded-xl border border-brennan-border bg-white shadow-sm">
         <div className="border-b border-brennan-border px-5 py-3">
@@ -268,10 +393,11 @@ export default function ReconciliationPageClient({
                   <th className="px-4 py-2">Period</th>
                   <th className="px-4 py-2">Status</th>
                   <th className="px-4 py-2">Claim Lines</th>
-                  <th className="px-4 py-2">Valid / Errors</th>
+                  <th className="px-4 py-2">Matched</th>
                   <th className="px-4 py-2">Exceptions</th>
                   <th className="px-4 py-2">Started</th>
                   <th className="px-4 py-2">By</th>
+                  <th className="px-4 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -288,13 +414,8 @@ export default function ReconciliationPageClient({
                     </td>
                     <td className="px-4 py-2 text-gray-600">{run.totalClaimLines}</td>
                     <td className="px-4 py-2">
-                      {run.claimBatch ? (
-                        <span>
-                          <span className="text-green-700">{run.claimBatch.validRows}</span>
-                          {run.claimBatch.errorRows > 0 && (
-                            <span className="text-red-600"> / {run.claimBatch.errorRows}</span>
-                          )}
-                        </span>
+                      {run.approvedCount > 0 ? (
+                        <span className="text-green-700 font-medium">{run.approvedCount}</span>
                       ) : (
                         <span className="text-gray-400">—</span>
                       )}
@@ -302,12 +423,34 @@ export default function ReconciliationPageClient({
                     <td className="px-4 py-2">
                       {run._count.issues > 0 ? (
                         <span className="text-amber-600 font-medium">{run._count.issues}</span>
+                      ) : run.status === "completed" || run.status === "review" ? (
+                        <span className="text-green-600">0</span>
                       ) : (
                         <span className="text-gray-400">—</span>
                       )}
                     </td>
                     <td className="px-4 py-2 text-gray-500 text-xs">{formatDate(run.startedAt)}</td>
                     <td className="px-4 py-2 text-gray-500 text-xs">{run.runBy.displayName}</td>
+                    <td className="px-4 py-2">
+                      {run.status === "staged" && (
+                        <button
+                          onClick={() => handleValidate(run.id)}
+                          disabled={validating === run.id}
+                          className="rounded bg-brennan-blue px-3 py-1 text-xs font-medium text-white hover:bg-brennan-blue/90 disabled:opacity-50"
+                        >
+                          {validating === run.id ? "Validating..." : "Validate"}
+                        </button>
+                      )}
+                      {(run.status === "review" || run.status === "completed") && (
+                        <button
+                          onClick={() => handleValidate(run.id)}
+                          disabled={validating === run.id}
+                          className="rounded border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          {validating === run.id ? "Re-validating..." : "Re-validate"}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -325,14 +468,13 @@ export default function ReconciliationPageClient({
 
 function getDefaultPeriod(): string {
   const now = new Date();
-  // Default to previous month
   const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function formatPeriod(dateStr: string): string {
-  const d = new Date(dateStr);
-  return d.toLocaleDateString("en-US", { year: "numeric", month: "short" });
+  const d = new Date(dateStr + (dateStr.includes("T") ? "" : "T00:00:00Z"));
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", timeZone: "UTC" });
 }
 
 function formatDate(dateStr: string): string {
@@ -342,6 +484,16 @@ function formatDate(dateStr: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function SummaryCard({ label, value, color }: { label: string; value: string | number; color?: string }) {
+  const colorClass = color === "green" ? "text-green-700" : color === "amber" ? "text-amber-700" : "text-gray-900";
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50/50 px-4 py-3 text-center">
+      <p className="text-xs text-gray-500">{label}</p>
+      <p className={`mt-1 text-xl font-bold ${colorClass}`}>{value}</p>
+    </div>
+  );
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -357,6 +509,19 @@ function StatusBadge({ status }: { status: string }) {
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[status] || colors.draft}`}>
       {status}
+    </span>
+  );
+}
+
+function SeverityBadge({ severity }: { severity: string }) {
+  const colors: Record<string, string> = {
+    error: "bg-red-100 text-red-700",
+    warning: "bg-amber-100 text-amber-700",
+    info: "bg-blue-100 text-blue-700",
+  };
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[severity] || colors.info}`}>
+      {severity}
     </span>
   );
 }

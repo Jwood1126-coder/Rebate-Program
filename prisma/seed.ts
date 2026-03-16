@@ -164,6 +164,21 @@ async function main() {
     },
   });
 
+  // Motion / Komatsu contract (active through 2027)
+  const contract4 = await prisma.contract.upsert({
+    where: { distributorId_endUserId_contractNumber: { distributorId: motion.id, endUserId: komatsu.id, contractNumber: "102450" } },
+    update: {},
+    create: {
+      distributorId: motion.id,
+      endUserId: komatsu.id,
+      contractNumber: "102450",
+      description: "Motion / Komatsu hydraulics & fittings",
+      startDate: new Date("2025-06-01"),
+      endDate: new Date("2027-05-31"),
+      status: "active",
+    },
+  });
+
   // --- Rebate Plans ---
   const planOSW = await prisma.rebatePlan.upsert({
     where: { contractId_planCode: { contractId: contract1.id, planCode: "OSW" } },
@@ -181,6 +196,12 @@ async function main() {
     where: { contractId_planCode: { contractId: contract3.id, planCode: "BRG" } },
     update: {},
     create: { contractId: contract3.id, planCode: "BRG", planName: "Bearing Program", discountType: "product_code", status: "active" },
+  });
+
+  const planMHF = await prisma.rebatePlan.upsert({
+    where: { contractId_planCode: { contractId: contract4.id, planCode: "MHF" } },
+    update: {},
+    create: { contractId: contract4.id, planCode: "MHF", planName: "Motion Hydraulic Fittings", discountType: "part", status: "active" },
   });
 
   // --- Items ---
@@ -221,6 +242,15 @@ async function main() {
     prisma.item.upsert({ where: { itemNumber: "2406-20-08" }, update: {}, create: { itemNumber: "2406-20-08", description: "OSW Tee 1-1/4\"x1/2\"", productCode: "OSW" } }),
     prisma.item.upsert({ where: { itemNumber: "2406-20-16" }, update: {}, create: { itemNumber: "2406-20-16", description: "OSW Tee 1-1/4\"x1\"", productCode: "OSW" } }),
     prisma.item.upsert({ where: { itemNumber: "2408-10" }, update: {}, create: { itemNumber: "2408-10", description: "OSW Cross 5/8\"", productCode: "OSW" } }),
+    // Motion / Komatsu items (idx 34-41)
+    prisma.item.upsert({ where: { itemNumber: "6801-08-08-NWO-FG" }, update: {}, create: { itemNumber: "6801-08-08-NWO-FG", description: "1/2\" Male JIC x 1/2\" Male ORB 90 Elbow", productCode: "HYD" } }),
+    prisma.item.upsert({ where: { itemNumber: "6801-12-12-NWO-FG" }, update: {}, create: { itemNumber: "6801-12-12-NWO-FG", description: "3/4\" Male JIC x 3/4\" Male ORB 90 Elbow", productCode: "HYD" } }),
+    prisma.item.upsert({ where: { itemNumber: "6801-16-16-NWO-FG" }, update: {}, create: { itemNumber: "6801-16-16-NWO-FG", description: "1\" Male JIC x 1\" Male ORB 90 Elbow", productCode: "HYD" } }),
+    prisma.item.upsert({ where: { itemNumber: "6400-08-08" }, update: {}, create: { itemNumber: "6400-08-08", description: "1/2\" Male ORB x 1/2\" Male Pipe Adapter", productCode: "HYD" } }),
+    prisma.item.upsert({ where: { itemNumber: "6400-12-12" }, update: {}, create: { itemNumber: "6400-12-12", description: "3/4\" Male ORB x 3/4\" Male Pipe Adapter", productCode: "HYD" } }),
+    prisma.item.upsert({ where: { itemNumber: "6400-16-16" }, update: {}, create: { itemNumber: "6400-16-16", description: "1\" Male ORB x 1\" Male Pipe Adapter", productCode: "HYD" } }),
+    prisma.item.upsert({ where: { itemNumber: "6502-12-12" }, update: {}, create: { itemNumber: "6502-12-12", description: "3/4\" Female JIC Swivel x 3/4\" Male ORB", productCode: "HYD" } }),
+    prisma.item.upsert({ where: { itemNumber: "6502-16-16" }, update: {}, create: { itemNumber: "6502-16-16", description: "1\" Female JIC Swivel x 1\" Male ORB", productCode: "HYD" } }),
   ]);
 
   // --- Rebate Records ---
@@ -260,6 +290,15 @@ async function main() {
     { planId: planOSW.id, itemIdx: 31, price: 7.22, start: "2023-11-01", end: "2026-12-31", status: "active" },  // 2406-20-08
     { planId: planOSW.id, itemIdx: 32, price: 5.61, start: "2023-11-01", end: "2026-12-31", status: "active" },  // 2406-20-16
     { planId: planOSW.id, itemIdx: 33, price: 0.86, start: "2023-11-01", end: "2026-12-31", status: "active" },  // 2408-10
+    // Motion / Komatsu (contract 102450, plan MHF)
+    { planId: planMHF.id, itemIdx: 34, price: 3.80, start: "2025-06-01", end: "2027-05-31", status: "active" },  // 6801-08-08-NWO-FG
+    { planId: planMHF.id, itemIdx: 35, price: 5.52, start: "2025-06-01", end: "2027-05-31", status: "active" },  // 6801-12-12-NWO-FG
+    { planId: planMHF.id, itemIdx: 36, price: 6.65, start: "2025-06-01", end: "2027-05-31", status: "active" },  // 6801-16-16-NWO-FG
+    { planId: planMHF.id, itemIdx: 37, price: 2.90, start: "2025-06-01", end: "2027-05-31", status: "active" },  // 6400-08-08
+    { planId: planMHF.id, itemIdx: 38, price: 4.25, start: "2025-06-01", end: "2027-05-31", status: "active" },  // 6400-12-12
+    { planId: planMHF.id, itemIdx: 39, price: 5.80, start: "2025-06-01", end: "2027-05-31", status: "active" },  // 6400-16-16
+    { planId: planMHF.id, itemIdx: 40, price: 7.10, start: "2025-06-01", end: "2027-05-31", status: "active" },  // 6502-12-12
+    { planId: planMHF.id, itemIdx: 41, price: 9.45, start: "2025-06-01", end: "2027-05-31", status: "active" },  // 6502-16-16
   ];
 
   for (const r of recordData) {
