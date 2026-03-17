@@ -208,6 +208,9 @@ function RecordsPageInner({
     }
   }
 
+  // Audit history panel state
+  const [historyRecordId, setHistoryRecordId] = useState<number | null>(null);
+
   // Which actions are available for a record based on its status
   function getRowActions(r: RecordRow) {
     const actions: { label: string; onClick: () => void; danger?: boolean }[] = [];
@@ -222,7 +225,8 @@ function RecordsPageInner({
     } else if (r.status === "expired") {
       actions.push({ label: "Supersede", onClick: () => setSupersedeRecord(r) });
     }
-    // superseded and cancelled records have no actions
+    // History is always available regardless of status
+    actions.push({ label: "History", onClick: () => setHistoryRecordId(r.id) });
     return actions;
   }
 
@@ -538,6 +542,14 @@ function RecordsPageInner({
           onClose={() => setEntityModal(null)}
         />
       )}
+
+      {/* Audit history panel */}
+      {historyRecordId && (
+        <AuditHistoryPanel
+          recordId={historyRecordId}
+          onClose={() => setHistoryRecordId(null)}
+        />
+      )}
     </>
   );
 }
@@ -833,6 +845,143 @@ function EntityEditModal({
             </button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Audit history panel — shows the complete change history for a single record.
+ * Fetches from /api/audit?table=rebate_records&recordId=N
+ */
+function AuditHistoryPanel({
+  recordId,
+  onClose,
+}: {
+  recordId: number;
+  onClose: () => void;
+}) {
+  const [entries, setEntries] = useState<{
+    id: number;
+    action: string;
+    changedFields: Record<string, { old: unknown; new: unknown }> | null;
+    user: { displayName: string } | null;
+    createdAt: string;
+  }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/audit?table=rebate_records&recordId=${recordId}&limit=50`)
+      .then((res) => res.ok ? res.json() : Promise.reject("Failed"))
+      .then((data) => {
+        setEntries(data.entries ?? []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [recordId]);
+
+  const actionColors: Record<string, string> = {
+    INSERT: "bg-green-100 text-green-700",
+    UPDATE: "bg-blue-100 text-blue-700",
+    DELETE: "bg-red-100 text-red-700",
+  };
+
+  function formatValue(v: unknown): string {
+    if (v === null || v === undefined) return "—";
+    if (typeof v === "boolean") return v ? "Yes" : "No";
+    return String(v);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative w-full max-w-lg max-h-[80vh] flex flex-col rounded-xl bg-white shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-brennan-border px-5 py-3.5">
+          <h2 className="text-base font-bold text-brennan-text">
+            Audit History — Record #{recordId}
+          </h2>
+          <button
+            onClick={onClose}
+            className="rounded p-1 text-gray-400 hover:bg-brennan-light hover:text-gray-600"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {loading && <p className="text-sm text-gray-400">Loading history...</p>}
+
+          {!loading && entries.length === 0 && (
+            <p className="text-sm text-gray-400">No audit entries found for this record.</p>
+          )}
+
+          {!loading && entries.length > 0 && (
+            <div className="space-y-3">
+              {entries.map((entry) => (
+                <div key={entry.id} className="rounded-lg border border-brennan-border p-3">
+                  <div className="flex items-center gap-2">
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${actionColors[entry.action] || "bg-gray-100 text-gray-600"}`}>
+                      {entry.action}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {entry.user?.displayName ?? "System"}
+                    </span>
+                    <span className="ml-auto text-xs text-gray-400">
+                      {new Date(entry.createdAt).toLocaleString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+
+                  {entry.changedFields && Object.keys(entry.changedFields).length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {Object.entries(entry.changedFields).map(([field, diff]) => (
+                        <div key={field} className="flex items-start gap-2 text-xs">
+                          <span className="min-w-[80px] shrink-0 font-medium text-gray-600">
+                            {field}
+                          </span>
+                          {entry.action === "INSERT" ? (
+                            <span className="text-green-700">
+                              {formatValue(typeof diff === "object" && diff && "new" in diff ? diff.new : diff)}
+                            </span>
+                          ) : (
+                            <span className="text-gray-500">
+                              <span className="line-through text-red-400">
+                                {formatValue(typeof diff === "object" && diff && "old" in diff ? diff.old : null)}
+                              </span>
+                              {" → "}
+                              <span className="font-medium text-brennan-text">
+                                {formatValue(typeof diff === "object" && diff && "new" in diff ? diff.new : diff)}
+                              </span>
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-brennan-border px-5 py-3 text-right">
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-brennan-border bg-white px-4 py-2 text-sm font-medium text-brennan-text transition-colors hover:bg-brennan-light"
+          >
+            Close
+          </button>
+        </div>
       </div>
     </div>
   );

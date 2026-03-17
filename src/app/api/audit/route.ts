@@ -5,6 +5,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const action = searchParams.get("action");
   const tableName = searchParams.get("table");
+  const recordId = searchParams.get("recordId");
   const page = parseInt(searchParams.get("page") || "1");
   const limit = parseInt(searchParams.get("limit") || "50");
 
@@ -12,6 +13,7 @@ export async function GET(request: NextRequest) {
   const where: any = {};
   if (action) where.action = action;
   if (tableName) where.tableName = tableName;
+  if (recordId) where.recordId = parseInt(recordId);
 
   const [entries, total] = await Promise.all([
     prisma.auditLog.findMany({
