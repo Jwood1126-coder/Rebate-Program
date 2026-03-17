@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 interface Plan {
   id: number;
@@ -207,7 +208,6 @@ export function RecordModal({ open, onClose, record }: RecordModalProps) {
   const showWarningConfirmation = pendingWarnings.length > 0 && validationErrors.length === 0;
 
   const inputClasses = "w-full rounded-lg border border-brennan-border px-3 py-2 text-sm text-brennan-text focus:border-brennan-blue focus:outline-none focus:ring-1 focus:ring-brennan-blue";
-  const disabledInputClasses = "w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500 cursor-not-allowed";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -293,22 +293,18 @@ export function RecordModal({ open, onClose, record }: RecordModalProps) {
               <label className="mb-1 block text-xs font-medium text-gray-600">
                 Rebate Plan <span className="text-red-500">*</span>
               </label>
-              <select
-                value={formData.rebatePlanId}
-                onChange={(e) =>
-                  setFormData({ ...formData, rebatePlanId: Number(e.target.value) })
+              <SearchableSelect
+                options={plans.map((p) => ({
+                  value: String(p.id),
+                  label: `${p.contract.distributor.code} / ${p.contract.contractNumber} / ${p.planCode}${p.planName ? ` — ${p.planName}` : ""}`,
+                }))}
+                value={formData.rebatePlanId ? String(formData.rebatePlanId) : ""}
+                onChange={(v) =>
+                  setFormData({ ...formData, rebatePlanId: v ? Number(v) : 0 })
                 }
-                className={isEdit ? disabledInputClasses : inputClasses}
-                required
+                placeholder="Select a plan..."
                 disabled={isEdit}
-              >
-                <option value={0}>Select a plan...</option>
-                {plans.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.contract.distributor.code} / {p.contract.contractNumber} / {p.planCode} — {p.planName}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
 
             {/* Selected plan context card */}
@@ -332,23 +328,18 @@ export function RecordModal({ open, onClose, record }: RecordModalProps) {
               <label className="mb-1 block text-xs font-medium text-gray-600">
                 Item <span className="text-red-500">*</span>
               </label>
-              <select
-                value={formData.itemId}
-                onChange={(e) =>
-                  setFormData({ ...formData, itemId: Number(e.target.value) })
+              <SearchableSelect
+                options={items.map((item) => ({
+                  value: String(item.id),
+                  label: `${item.itemNumber}${item.description ? ` — ${item.description}` : ""}`,
+                }))}
+                value={formData.itemId ? String(formData.itemId) : ""}
+                onChange={(v) =>
+                  setFormData({ ...formData, itemId: v ? Number(v) : 0 })
                 }
-                className={isEdit ? disabledInputClasses : inputClasses}
-                required
+                placeholder="Select an item..."
                 disabled={isEdit}
-              >
-                <option value={0}>Select an item...</option>
-                {items.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.itemNumber}
-                    {item.description ? ` — ${item.description}` : ""}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
 
             {/* Rebate Price */}
