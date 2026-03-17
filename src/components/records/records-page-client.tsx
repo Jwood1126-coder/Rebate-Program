@@ -208,6 +208,46 @@ function RecordsPageInner({
     }
   }
 
+  // Export current filtered view as CSV
+  const [exporting, setExporting] = useState(false);
+  async function handleExport() {
+    setExporting(true);
+    try {
+      // Pass current filters to the CSV endpoint
+      const exportParams = new URLSearchParams();
+      if (filterDistributor) exportParams.set("distributor", filterDistributor);
+      if (filterContract) exportParams.set("contract", filterContract);
+      if (filterPlan) exportParams.set("plan", filterPlan);
+      if (filterEndUser) exportParams.set("endUser", filterEndUser);
+      if (filterStatus) exportParams.set("status", filterStatus);
+      if (filterDateFrom) exportParams.set("dateFrom", filterDateFrom);
+      if (filterDateTo) exportParams.set("dateTo", filterDateTo);
+      if (searchText) exportParams.set("search", searchText);
+
+      const qs = exportParams.toString();
+      const url = `/api/export/records-csv${qs ? `?${qs}` : ""}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        alert("Export failed");
+        return;
+      }
+      const blob = await res.blob();
+      const filename = res.headers.get("Content-Disposition")?.match(/filename="(.+)"/)?.[1]
+        || "rms-records-export.csv";
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch {
+      alert("Export failed");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   // Audit history panel state
   const [historyRecordId, setHistoryRecordId] = useState<number | null>(null);
 
@@ -261,12 +301,21 @@ function RecordsPageInner({
             )}
           </p>
         </div>
-        <button
-          onClick={handleNewRecord}
-          className="rounded-lg bg-brennan-blue px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brennan-dark"
-        >
-          + New Record
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExport}
+            disabled={exporting || totalCount === 0}
+            className="rounded-lg border border-brennan-border bg-white px-3 py-2 text-sm font-medium text-brennan-text shadow-sm transition-colors hover:bg-brennan-light disabled:opacity-50"
+          >
+            {exporting ? "Exporting..." : hasFilters ? "Export Filtered" : "Export CSV"}
+          </button>
+          <button
+            onClick={handleNewRecord}
+            className="rounded-lg bg-brennan-blue px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brennan-dark"
+          >
+            + New Record
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -851,8 +900,7 @@ function EntityEditModal({
 }
 
 /**
- * Audit history panel — shows the complete change history for a single record.
- * Fetches from /api/audit?table=rebate_records&recordId=N
+ * Record detail panel — tabbed modal showing History + Notes for a single record.
  */
 function AuditHistoryPanel({
   recordId,
@@ -861,6 +909,65 @@ function AuditHistoryPanel({
   recordId: number;
   onClose: () => void;
 }) {
+  const [tab, setTab] = useState<"history" | "notes">("history");
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative w-full max-w-lg max-h-[80vh] flex flex-col rounded-xl bg-white shadow-2xl">
+        {/* Header with tabs */}
+        <div className="border-b border-brennan-border px-5 py-3.5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-brennan-text">
+              Record #{recordId}
+            </h2>
+            <button
+              onClick={onClose}
+              className="rounded p-1 text-gray-400 hover:bg-brennan-light hover:text-gray-600"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="mt-2 flex gap-1">
+            {(["history", "notes"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                  tab === t
+                    ? "bg-brennan-blue text-white"
+                    : "text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                }`}
+              >
+                {t === "history" ? "History" : "Notes"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {tab === "history" && <HistoryTab recordId={recordId} />}
+          {tab === "notes" && <NotesTab recordId={recordId} />}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-brennan-border px-5 py-3 text-right">
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-brennan-border bg-white px-4 py-2 text-sm font-medium text-brennan-text transition-colors hover:bg-brennan-light"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HistoryTab({ recordId }: { recordId: number }) {
   const [entries, setEntries] = useState<{
     id: number;
     action: string;
@@ -892,97 +999,176 @@ function AuditHistoryPanel({
     return String(v);
   }
 
+  if (loading) return <p className="text-sm text-gray-400">Loading history...</p>;
+  if (entries.length === 0) return <p className="text-sm text-gray-400">No audit entries found for this record.</p>;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-lg max-h-[80vh] flex flex-col rounded-xl bg-white shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-brennan-border px-5 py-3.5">
-          <h2 className="text-base font-bold text-brennan-text">
-            Audit History — Record #{recordId}
-          </h2>
-          <button
-            onClick={onClose}
-            className="rounded p-1 text-gray-400 hover:bg-brennan-light hover:text-gray-600"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+    <div className="space-y-3">
+      {entries.map((entry) => (
+        <div key={entry.id} className="rounded-lg border border-brennan-border p-3">
+          <div className="flex items-center gap-2">
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${actionColors[entry.action] || "bg-gray-100 text-gray-600"}`}>
+              {entry.action}
+            </span>
+            <span className="text-xs text-gray-500">
+              {entry.user?.displayName ?? "System"}
+            </span>
+            <span className="ml-auto text-xs text-gray-400">
+              {new Date(entry.createdAt).toLocaleString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })}
+            </span>
+          </div>
 
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          {loading && <p className="text-sm text-gray-400">Loading history...</p>}
-
-          {!loading && entries.length === 0 && (
-            <p className="text-sm text-gray-400">No audit entries found for this record.</p>
-          )}
-
-          {!loading && entries.length > 0 && (
-            <div className="space-y-3">
-              {entries.map((entry) => (
-                <div key={entry.id} className="rounded-lg border border-brennan-border p-3">
-                  <div className="flex items-center gap-2">
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${actionColors[entry.action] || "bg-gray-100 text-gray-600"}`}>
-                      {entry.action}
+          {entry.changedFields && Object.keys(entry.changedFields).length > 0 && (
+            <div className="mt-2 space-y-1">
+              {Object.entries(entry.changedFields).map(([field, diff]) => (
+                <div key={field} className="flex items-start gap-2 text-xs">
+                  <span className="min-w-[80px] shrink-0 font-medium text-gray-600">
+                    {field}
+                  </span>
+                  {entry.action === "INSERT" ? (
+                    <span className="text-green-700">
+                      {formatValue(typeof diff === "object" && diff && "new" in diff ? diff.new : diff)}
                     </span>
-                    <span className="text-xs text-gray-500">
-                      {entry.user?.displayName ?? "System"}
+                  ) : (
+                    <span className="text-gray-500">
+                      <span className="line-through text-red-400">
+                        {formatValue(typeof diff === "object" && diff && "old" in diff ? diff.old : null)}
+                      </span>
+                      {" → "}
+                      <span className="font-medium text-brennan-text">
+                        {formatValue(typeof diff === "object" && diff && "new" in diff ? diff.new : diff)}
+                      </span>
                     </span>
-                    <span className="ml-auto text-xs text-gray-400">
-                      {new Date(entry.createdAt).toLocaleString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                  </div>
-
-                  {entry.changedFields && Object.keys(entry.changedFields).length > 0 && (
-                    <div className="mt-2 space-y-1">
-                      {Object.entries(entry.changedFields).map(([field, diff]) => (
-                        <div key={field} className="flex items-start gap-2 text-xs">
-                          <span className="min-w-[80px] shrink-0 font-medium text-gray-600">
-                            {field}
-                          </span>
-                          {entry.action === "INSERT" ? (
-                            <span className="text-green-700">
-                              {formatValue(typeof diff === "object" && diff && "new" in diff ? diff.new : diff)}
-                            </span>
-                          ) : (
-                            <span className="text-gray-500">
-                              <span className="line-through text-red-400">
-                                {formatValue(typeof diff === "object" && diff && "old" in diff ? diff.old : null)}
-                              </span>
-                              {" → "}
-                              <span className="font-medium text-brennan-text">
-                                {formatValue(typeof diff === "object" && diff && "new" in diff ? diff.new : diff)}
-                              </span>
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
                   )}
                 </div>
               ))}
             </div>
           )}
         </div>
+      ))}
+    </div>
+  );
+}
 
-        {/* Footer */}
-        <div className="border-t border-brennan-border px-5 py-3 text-right">
+function NotesTab({ recordId }: { recordId: number }) {
+  const [notes, setNotes] = useState<{
+    id: number;
+    noteText: string;
+    noteType: string;
+    createdBy: { displayName: string; username: string };
+    createdAt: string;
+  }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newNote, setNewNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchNotes = useCallback(() => {
+    fetch(`/api/records/${recordId}/notes`)
+      .then((res) => res.ok ? res.json() : Promise.reject("Failed"))
+      .then((data) => {
+        setNotes(data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [recordId]);
+
+  useEffect(() => { fetchNotes(); }, [fetchNotes]);
+
+  async function handleAddNote() {
+    if (!newNote.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/records/${recordId}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ noteText: newNote.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error || "Failed to add note");
+        return;
+      }
+      setNewNote("");
+      fetchNotes();
+    } catch {
+      setError("Network error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const noteTypeColors: Record<string, string> = {
+    general: "bg-gray-100 text-gray-600",
+    pricing: "bg-blue-100 text-blue-600",
+    contract: "bg-purple-100 text-purple-600",
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Add note form */}
+      <div className="space-y-2">
+        <textarea
+          value={newNote}
+          onChange={(e) => setNewNote(e.target.value)}
+          placeholder="Add a note about this record..."
+          rows={2}
+          className="w-full rounded-lg border border-brennan-border px-3 py-2 text-sm text-brennan-text placeholder:text-gray-400 focus:border-brennan-blue focus:outline-none focus:ring-1 focus:ring-brennan-blue"
+        />
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        <div className="flex justify-end">
           <button
-            onClick={onClose}
-            className="rounded-lg border border-brennan-border bg-white px-4 py-2 text-sm font-medium text-brennan-text transition-colors hover:bg-brennan-light"
+            onClick={handleAddNote}
+            disabled={saving || !newNote.trim()}
+            className="rounded-lg bg-brennan-blue px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brennan-dark disabled:opacity-50"
           >
-            Close
+            {saving ? "Adding..." : "Add Note"}
           </button>
         </div>
       </div>
+
+      {/* Notes list */}
+      {loading && <p className="text-sm text-gray-400">Loading notes...</p>}
+
+      {!loading && notes.length === 0 && (
+        <p className="text-sm text-gray-400">No notes yet for this record.</p>
+      )}
+
+      {!loading && notes.length > 0 && (
+        <div className="space-y-3">
+          {notes.map((note) => (
+            <div key={note.id} className="rounded-lg border border-brennan-border p-3">
+              <div className="flex items-center gap-2">
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${noteTypeColors[note.noteType] || "bg-gray-100 text-gray-600"}`}>
+                  {note.noteType}
+                </span>
+                <span className="text-xs text-gray-500">
+                  {note.createdBy.displayName}
+                </span>
+                <span className="ml-auto text-xs text-gray-400">
+                  {new Date(note.createdAt).toLocaleString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </div>
+              <p className="mt-1.5 text-sm text-brennan-text whitespace-pre-wrap">
+                {note.noteText}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
