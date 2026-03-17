@@ -4,6 +4,106 @@ All notable changes to this project are documented in this file, grouped by sess
 
 ---
 
+## 2026-03-17 — Reconciliation Issue Review Enhancement
+
+### Expandable Issue Detail Rows (New)
+- Issue rows in the exception review table are now clickable — expand inline to show full claim and master data context
+- **Claim Data column** — shows all claim row fields: contract number, item number, claimed price, quantity, line amount, transaction date, end user, order number
+- **Master Data / Comparison column** — issue-type-specific detail panels:
+  - **CLM-001 (Price Mismatch)**: Visual price comparison boxes — contract price vs claimed price with diff
+  - **CLM-003 (Item Not in Contract)**: Contract, item, target plan, claimed price, available plan IDs
+  - **CLM-004 (Contract Not Found)**: Searched contract number with guidance text
+  - **CLM-005 (Ambiguous Match)**: Candidate record IDs and contract context
+  - **CLM-006 (Unknown Item)**: Item number, contract, claimed price
+  - **CLM-007 (Contract Expired)**: Date guidance
+  - **Informational warnings**: Master/committed record IDs where available
+
+### "If Approved" Commit Consequence Column (New)
+- Replaces the Description column in the summary row with a clear commit-consequence label:
+  - CLM-001: "Update price $X.XX → $Y.YY"
+  - CLM-003: "Add item to contract plan"
+  - CLM-006: "Create new item + record"
+  - CLM-004: "Contract not found — manual review"
+  - Warnings: "Informational — no master data change"
+- Full description moved into the expanded detail panel
+
+### Issues API Enrichment
+- `getRunIssues()` now joins claim row data via separate query + Map (same pattern as CSV export)
+- No schema changes — uses existing `claimRowId` FK on `reconciliation_issues`
+- Added to response: `claimRow` object with `rowNumber`, `contractNumber`, `planCode`, `itemNumber`, `deviatedPrice`, `quantity`, `claimedAmount`, `transactionDate`, `endUserCode`, `endUserName`, `distributorOrderNumber`, `matchedRecordId`
+
+### Tests
+- 204 tests across 13 files — all passing, TypeScript clean, lint clean
+
+---
+
+## 2026-03-17 — Reconciliation Outcomes + Run Summary + Export
+
+### Reconciliation Run Summary (New)
+- **Durable commit summary** — commit outcomes (`recordsCreated`, `recordsSuperseded`, `recordsUpdated`, `itemsCreated`, `confirmed`, `rejected`, `dismissed`, `deferred`) are now persisted on the run via `commitSummary` JSONB field
+- **Run Outcome panel** — committed runs display a persistent, richly formatted summary showing distributor, claim period, resolution breakdown, and master data changes
+- Previously the commit summary was ephemeral React state — now it survives page refresh and run re-selection
+
+### Reconciliation Export (New)
+- `GET /api/export/reconciliation-run/[id]` — CSV export of a reconciliation run
+- Metadata header rows: distributor, claim period, status, run by, claim file, timing
+- Summary counts: total claim lines, validated, exceptions, resolution breakdown, commit outcomes
+- Issue table: exception code, severity, category, description, suggested action, resolution, resolution note, resolver, contract/plan/item identifiers, claimed price, master/committed record IDs
+- Export button in review panel header and runs table (for committed runs)
+
+### Reconciliation UI Improvements
+- Committed runs now show the Run Outcome panel instead of just a one-line "Committed" label
+- Export CSV button available in the exception review panel header for runs in review, reviewed, or committed status
+- Close button now also clears ephemeral commit result state
+
+### Record Detail Actions (New)
+- `/records/[id]` now supports Edit, Supersede, Expire, and Cancel — same actions available in the Records table
+- **Shared action-availability helper** (`src/lib/records/record-actions.ts`) — single source of truth for which actions are valid per status, used by both detail page and table
+- Records table `getRowActions()` refactored to use the shared helper
+- Post-action behavior: Edit/Expire/Cancel → stay on page and refresh. Supersede → redirect to new replacement record (`/records/[newId]`)
+- SupersedeModal now accepts optional `onSuccess` callback for post-save navigation
+
+### Schema Change
+- Added `commitSummary Json?` to `ReconciliationRun` model — persists the commit outcome summary at commit time
+
+### Data Model Limits (Documented)
+- `approvedAmount` and `rejectedAmount` fields on `reconciliation_runs` are defined but **never populated** — monetary totals are not yet available
+- `claimedAmount` on `ClaimRow` is nullable and depends on distributor column mapping — not reliable for aggregate reporting
+- Count-based summary only for now; monetary reporting deferred until data population is confirmed
+
+### Tests
+- 204 tests across 13 files (1 new test for commitSummary persistence)
+
+---
+
+## 2026-03-17 — Record Detail Page + Deep Links + Navigation
+
+### Record Detail Page (New)
+- `/records/[id]` — canonical single-record inspection surface
+- Header card with core pricing info: rebate price, item, effective period, derived status
+- Full contract context: distributor, end user, contract number, plan code, discount type
+- **Supersession chain visualization** — linked timeline of predecessor → current → successor records
+- Notes panel with inline add-note form
+- Audit history timeline with field-level diffs
+- Record metadata sidebar (created/updated by, timestamps)
+
+### Deep Links (New + Updated)
+- Records table: "View" action added to every row's action menu → navigates to detail page
+- Contract detail: record item numbers are now clickable links to `/records/[id]`
+- Reconciliation issues: "Record" and "Committed" context badges link to matched/committed records
+- Removed `target="_blank"` from reconciliation context links (internal navigation)
+
+### Contract Browse/Detail (Previous Session — Committed)
+- `/contracts` list page with server-side filtering, pagination, cascading filter options
+- `/contracts/[id]` detail page with plans, records, status breakdown
+- Reconciliation issue context links for contracts (CLM-004 search badge)
+- Sidebar updated: "Create Contract" → "Contracts"
+
+### Bug Fixes
+- Fixed pre-existing eslint `set-state-in-effect` warning in Records search input
+
+---
+
 ## 2026-03-16 — Column Mapping Configuration + Contract Wizard + Reconciliation R1-R3
 
 ### Column Mapping Configuration (New)

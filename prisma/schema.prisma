@@ -283,6 +283,7 @@ model ReconciliationRun {
   rejectedCount     Int       @default(0) @map("rejected_count")
   approvedAmount    Decimal?  @map("approved_amount") @db.Decimal(12, 4)
   rejectedAmount    Decimal?  @map("rejected_amount") @db.Decimal(12, 4)
+  commitSummary     Json?     @map("commit_summary")   // Persisted at commit time: { recordsCreated, recordsSuperseded, recordsUpdated, itemsCreated, confirmed, rejected, dismissed, deferred, totalApproved }
   runById           Int       @map("run_by_id")
   startedAt         DateTime  @default(now()) @map("started_at")
   completedAt       DateTime? @map("completed_at")

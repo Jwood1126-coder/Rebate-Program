@@ -6,6 +6,7 @@ import { RecordModal } from "./record-modal";
 import { SupersedeModal } from "./supersede-modal";
 import { StatusBadge } from "./status-badge";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { getAvailableActions } from "@/lib/records/record-actions";
 import type { RecordStatus } from "@/lib/constants/statuses";
 
 export interface RecordRow {
@@ -252,19 +253,16 @@ function RecordsPageInner({
   const [historyRecordId, setHistoryRecordId] = useState<number | null>(null);
 
   // Which actions are available for a record based on its status
+  // Uses shared helper so detail page and table stay in sync
   function getRowActions(r: RecordRow) {
+    const avail = getAvailableActions(r.status);
     const actions: { label: string; onClick: () => void; danger?: boolean }[] = [];
-    if (r.status === "active" || r.status === "future") {
-      actions.push({ label: "Edit", onClick: () => handleEdit(r) });
-      actions.push({ label: "Supersede", onClick: () => setSupersedeRecord(r) });
-      actions.push({ label: "Expire", onClick: () => setConfirmAction({ type: "expire", record: r }), danger: true });
-      actions.push({ label: "Cancel", onClick: () => setConfirmAction({ type: "cancel", record: r }), danger: true });
-    } else if (r.status === "draft") {
-      actions.push({ label: "Edit", onClick: () => handleEdit(r) });
-      actions.push({ label: "Cancel", onClick: () => setConfirmAction({ type: "cancel", record: r }), danger: true });
-    } else if (r.status === "expired") {
-      actions.push({ label: "Supersede", onClick: () => setSupersedeRecord(r) });
-    }
+    // View detail is always available — canonical record inspection surface
+    actions.push({ label: "View", onClick: () => router.push(`/records/${r.id}`) });
+    if (avail.canEdit) actions.push({ label: "Edit", onClick: () => handleEdit(r) });
+    if (avail.canSupersede) actions.push({ label: "Supersede", onClick: () => setSupersedeRecord(r) });
+    if (avail.canExpire) actions.push({ label: "Expire", onClick: () => setConfirmAction({ type: "expire", record: r }), danger: true });
+    if (avail.canCancel) actions.push({ label: "Cancel", onClick: () => setConfirmAction({ type: "cancel", record: r }), danger: true });
     // History is always available regardless of status
     actions.push({ label: "History", onClick: () => setHistoryRecordId(r.id) });
     return actions;
@@ -625,6 +623,7 @@ function SearchInput({
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional prop-to-state sync
     setLocal(value);
   }, [value]);
 

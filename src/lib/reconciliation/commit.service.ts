@@ -92,24 +92,22 @@ export async function commitRun(runId: number, userId: number): Promise<CommitRe
 
   // Fast path: nothing approved — just mark committed
   if (approved.length === 0) {
+    const summary: CommitResult['summary'] = {
+      totalApproved: 0,
+      recordsCreated: 0,
+      recordsSuperseded: 0,
+      recordsUpdated: 0,
+      itemsCreated: 0,
+      confirmed: 0,
+      rejected: rejectedCount,
+      dismissed: dismissedCount,
+      deferred: deferredCount,
+    };
     await prisma.reconciliationRun.update({
       where: { id: runId },
-      data: { status: 'committed', completedAt: new Date() },
+      data: { status: 'committed', completedAt: new Date(), commitSummary: summary as unknown as Prisma.InputJsonValue },
     });
-    return {
-      success: true,
-      summary: {
-        totalApproved: 0,
-        recordsCreated: 0,
-        recordsSuperseded: 0,
-        recordsUpdated: 0,
-        itemsCreated: 0,
-        confirmed: 0,
-        rejected: rejectedCount,
-        dismissed: dismissedCount,
-        deferred: deferredCount,
-      },
-    };
+    return { success: true, summary };
   }
 
   // --- Execute all writes inside a single transaction ---
@@ -400,10 +398,27 @@ export async function commitRun(runId: number, userId: number): Promise<CommitRe
         }
       }
 
+      // Build durable commit summary
+      const summary: CommitResult['summary'] = {
+        totalApproved: approved.length,
+        recordsCreated,
+        recordsSuperseded,
+        recordsUpdated,
+        itemsCreated,
+        confirmed,
+        rejected: rejectedCount,
+        dismissed: dismissedCount,
+        deferred: deferredCount,
+      };
+
       // Transition run to committed — inside the transaction
       await tx.reconciliationRun.update({
         where: { id: runId },
-        data: { status: 'committed', completedAt: new Date() },
+        data: {
+          status: 'committed',
+          completedAt: new Date(),
+          commitSummary: summary as unknown as Prisma.InputJsonValue,
+        },
       });
 
       // Audit the commit event itself

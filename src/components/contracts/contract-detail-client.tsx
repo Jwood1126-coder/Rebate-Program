@@ -226,8 +226,14 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
                         <tbody className="divide-y divide-gray-50">
                           {plan.records.map((r) => (
                             <tr key={r.id} className="hover:bg-gray-50/50">
-                              <td className="px-4 py-1.5 font-mono font-medium text-brennan-text">
-                                {r.itemNumber}
+                              <td className="px-4 py-1.5 font-mono font-medium">
+                                <Link
+                                  href={`/records/${r.id}`}
+                                  className="text-brennan-blue hover:underline"
+                                  title={`View record #${r.id}`}
+                                >
+                                  {r.itemNumber}
+                                </Link>
                               </td>
                               <td className="px-3 py-1.5 text-gray-500 max-w-xs truncate">
                                 {r.itemDescription || "—"}

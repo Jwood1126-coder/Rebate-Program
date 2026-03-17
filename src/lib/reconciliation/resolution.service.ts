@@ -385,15 +385,66 @@ export async function getRunProgress(runId: number, db?: TxClient): Promise<RunP
 
 /**
  * Get all issues for a reconciliation run with claim row details.
+ * Joins claim row data for inline review context.
  */
 export async function getRunIssues(runId: number) {
-  return prisma.reconciliationIssue.findMany({
+  const issues = await prisma.reconciliationIssue.findMany({
     where: { reconciliationRunId: runId },
     include: {
       resolvedBy: { select: { displayName: true } },
     },
     orderBy: [{ claimRowId: 'asc' }, { code: 'asc' }],
   });
+
+  // Join claim row data for context (no Prisma relation exists)
+  const claimRowIds = [...new Set(issues.map(i => i.claimRowId).filter((id): id is number => id !== null))];
+  const claimRowMap = new Map<number, {
+    rowNumber: number;
+    contractNumber: string | null;
+    planCode: string | null;
+    itemNumber: string | null;
+    deviatedPrice: number | null;
+    quantity: number | null;
+    claimedAmount: number | null;
+    transactionDate: Date | null;
+    endUserCode: string | null;
+    endUserName: string | null;
+    distributorOrderNumber: string | null;
+    matchedRecordId: number | null;
+  }>();
+
+  if (claimRowIds.length > 0) {
+    const claimRows = await prisma.claimRow.findMany({
+      where: { id: { in: claimRowIds } },
+      select: {
+        id: true, rowNumber: true, contractNumber: true, planCode: true,
+        itemNumber: true, deviatedPrice: true, quantity: true, claimedAmount: true,
+        transactionDate: true, endUserCode: true, endUserName: true,
+        distributorOrderNumber: true, matchedRecordId: true,
+      },
+    });
+    for (const row of claimRows) {
+      claimRowMap.set(row.id, {
+        rowNumber: row.rowNumber,
+        contractNumber: row.contractNumber,
+        planCode: row.planCode,
+        itemNumber: row.itemNumber,
+        deviatedPrice: row.deviatedPrice ? Number(row.deviatedPrice) : null,
+        quantity: row.quantity ? Number(row.quantity) : null,
+        claimedAmount: row.claimedAmount ? Number(row.claimedAmount) : null,
+        transactionDate: row.transactionDate,
+        endUserCode: row.endUserCode,
+        endUserName: row.endUserName,
+        distributorOrderNumber: row.distributorOrderNumber,
+        matchedRecordId: row.matchedRecordId,
+      });
+    }
+  }
+
+  return issues.map(issue => ({
+    ...issue,
+    claimRow: issue.claimRowId ? claimRowMap.get(issue.claimRowId) ?? null : null,
+  }));
 }
 
 // ---------------------------------------------------------------------------

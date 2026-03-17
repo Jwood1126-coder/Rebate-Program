@@ -184,6 +184,28 @@ describe('commitRun', () => {
     );
   });
 
+  it('persists commitSummary on the run (fast path)', async () => {
+    mockPrisma.reconciliationRun.findUnique.mockResolvedValue(makeRun());
+    mockPrisma.reconciliationIssue.findMany.mockResolvedValue([
+      makeIssue({ resolution: 'rejected' }),
+      makeIssue({ id: 2, resolution: 'dismissed' }),
+      makeIssue({ id: 3, resolution: 'deferred' }),
+    ]);
+
+    await commitRun(1, 1);
+    const updateCall = mockPrisma.reconciliationRun.update.mock.calls[0][0];
+    expect(updateCall.data.commitSummary).toEqual(expect.objectContaining({
+      totalApproved: 0,
+      rejected: 1,
+      dismissed: 1,
+      deferred: 1,
+      recordsCreated: 0,
+      recordsSuperseded: 0,
+      recordsUpdated: 0,
+      itemsCreated: 0,
+    }));
+  });
+
   // --- CLM-001: Price mismatch (standard supersession) ---
 
   it('CLM-001: supersedes old record and creates new record at claimed price', async () => {
@@ -252,6 +274,20 @@ describe('commitRun', () => {
 
     // Audit entries: insert for new record + update for old record + update for run
     expect(tx.auditLog.create).toHaveBeenCalledTimes(3);
+
+    // Verify commitSummary persisted on the run inside the transaction
+    expect(tx.reconciliationRun.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          commitSummary: expect.objectContaining({
+            totalApproved: 1,
+            recordsCreated: 1,
+            recordsSuperseded: 1,
+            recordsUpdated: 0,
+          }),
+        }),
+      }),
+    );
   });
 
   // --- CLM-001: Same start date → in-place update ---

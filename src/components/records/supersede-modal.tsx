@@ -23,13 +23,16 @@ interface SupersedeModalProps {
     startDate: string;
     endDate: string;
   };
+  /** Called on successful supersede with the new replacement record's ID.
+   *  When provided, replaces the default router.refresh() + onClose() behavior. */
+  onSuccess?: (newRecordId: number) => void;
 }
 
 /**
  * Guided supersede workflow: creates a replacement record and end-dates the original.
  * Pre-fills from the old record so the user only adjusts what changed (usually price).
  */
-export function SupersedeModal({ open, onClose, record }: SupersedeModalProps) {
+export function SupersedeModal({ open, onClose, record, onSuccess }: SupersedeModalProps) {
   const router = useRouter();
 
   const todayStr = new Date().toISOString().split("T")[0];
@@ -83,8 +86,12 @@ export function SupersedeModal({ open, onClose, record }: SupersedeModalProps) {
         return;
       }
 
-      router.refresh();
-      onClose();
+      if (onSuccess && data.newRecord?.id) {
+        onSuccess(data.newRecord.id);
+      } else {
+        router.refresh();
+        onClose();
+      }
     } catch {
       setError("Network error. Please try again.");
     } finally {

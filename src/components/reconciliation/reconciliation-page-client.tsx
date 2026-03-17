@@ -1,11 +1,23 @@
 "use client";
 
-import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import React, { useState, useRef, useCallback, useMemo, useEffect } from "react";
 
 interface Distributor {
   id: number;
   code: string;
   name: string;
+}
+
+interface CommitSummaryData {
+  totalApproved: number;
+  recordsCreated: number;
+  recordsSuperseded: number;
+  recordsUpdated: number;
+  itemsCreated: number;
+  confirmed: number;
+  rejected: number;
+  dismissed: number;
+  deferred: number;
 }
 
 interface ReconciliationRun {
@@ -21,6 +33,7 @@ interface ReconciliationRun {
   rejectedCount: number;
   startedAt: string;
   completedAt: string | null;
+  commitSummary: CommitSummaryData | null;
   distributor: { code: string; name: string };
   runBy: { displayName: string };
   claimBatch: { fileName: string; totalRows: number; validRows: number; errorRows: number } | null;
@@ -56,6 +69,21 @@ interface ValidationResult {
 }
 
 // Issue from the database (with id and resolution fields)
+interface ClaimRowData {
+  rowNumber: number;
+  contractNumber: string | null;
+  planCode: string | null;
+  itemNumber: string | null;
+  deviatedPrice: number | null;
+  quantity: number | null;
+  claimedAmount: number | null;
+  transactionDate: string | null;
+  endUserCode: string | null;
+  endUserName: string | null;
+  distributorOrderNumber: string | null;
+  matchedRecordId: number | null;
+}
+
 interface DbIssue {
   id: number;
   reconciliationRunId: number;
@@ -73,6 +101,7 @@ interface DbIssue {
   resolvedById: number | null;
   resolvedAt: string | null;
   resolvedBy: { displayName: string } | null;
+  claimRow: ClaimRowData | null;
 }
 
 interface RunProgress {
@@ -142,6 +171,7 @@ export default function ReconciliationPageClient({
   const [reviewProgress, setReviewProgress] = useState<RunProgress | null>(null);
   const [loadingReview, setLoadingReview] = useState(false);
   const [resolvingIssue, setResolvingIssue] = useState<number | null>(null);
+  const [expandedIssueId, setExpandedIssueId] = useState<number | null>(null);
   const [bulkResolving, setBulkResolving] = useState(false);
 
   // Commit state (Phase R4)
@@ -197,6 +227,12 @@ export default function ReconciliationPageClient({
 
   const selectedDistributor = distributors.find(d => d.id === Number(selectedDistributorId));
   const hasMapping = selectedDistributor ? configuredDistributors.includes(selectedDistributor.code) : false;
+
+  // The run currently being reviewed (for durable commit summary)
+  const reviewRun = useMemo(
+    () => reviewRunId ? runs.find(r => r.id === reviewRunId) ?? null : null,
+    [reviewRunId, runs]
+  );
 
   // Filtered runs
   const filteredRuns = useMemo(() => {
@@ -846,12 +882,23 @@ export default function ReconciliationPageClient({
                 </span>
               )}
             </div>
-            <button
-              onClick={() => { setReviewRunId(null); setReviewIssues([]); setReviewProgress(null); }}
-              className="text-xs text-gray-400 hover:text-gray-600"
-            >
-              Close
-            </button>
+            <div className="flex items-center gap-2">
+              {reviewRun && ["review", "reviewed", "committed"].includes(reviewRun.status) && (
+                <a
+                  href={`/api/export/reconciliation-run/${reviewRunId}`}
+                  download
+                  className="rounded border border-brennan-border px-2.5 py-1 text-xs font-medium text-brennan-blue hover:bg-brennan-light transition-colors"
+                >
+                  Export CSV
+                </a>
+              )}
+              <button
+                onClick={() => { setReviewRunId(null); setReviewIssues([]); setReviewProgress(null); setCommitResult(null); }}
+                className="text-xs text-gray-400 hover:text-gray-600"
+              >
+                Close
+              </button>
+            </div>
           </div>
 
           <div className="px-5 py-4">
@@ -881,21 +928,14 @@ export default function ReconciliationPageClient({
                           {reviewProgress.breakdown.approved ?? 0} approved, {reviewProgress.breakdown.rejected ?? 0} rejected, {reviewProgress.breakdown.dismissed ?? 0} dismissed
                         </p>
 
-                        {commitResult?.success ? (
-                          <div className="mt-2 rounded border border-green-300 bg-white p-2">
-                            <p className="text-xs font-medium text-green-800">Committed to master data</p>
-                            <p className="text-xs text-green-700 mt-0.5">
-                              {commitResult.summary?.recordsCreated ?? 0} created, {commitResult.summary?.recordsSuperseded ?? 0} superseded, {commitResult.summary?.recordsUpdated ?? 0} updated, {commitResult.summary?.itemsCreated ?? 0} items, {commitResult.summary?.confirmed ?? 0} confirmed
-                            </p>
-                          </div>
-                        ) : commitResult?.error ? (
+                        {commitResult?.error ? (
                           <div className="mt-2 rounded border border-red-200 bg-red-50 p-2">
                             <p className="text-xs text-red-700">{commitResult.error}</p>
                             {commitResult.failedIssueId && (
                               <p className="text-xs text-red-500 mt-0.5">Issue ID: {commitResult.failedIssueId}</p>
                             )}
                           </div>
-                        ) : (
+                        ) : reviewRun?.status === "committed" ? null : (
                           <button
                             onClick={() => handleCommit(reviewRunId!)}
                             disabled={committing}
@@ -907,6 +947,11 @@ export default function ReconciliationPageClient({
                       </div>
                     )}
                   </div>
+                )}
+
+                {/* Durable Run Outcome panel — shown for committed runs */}
+                {reviewRun?.status === "committed" && (
+                  <RunOutcomePanel run={reviewRun} />
                 )}
 
                 {/* Bulk actions */}
@@ -944,27 +989,38 @@ export default function ReconciliationPageClient({
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="bg-gray-50 text-left text-gray-500 uppercase tracking-wider">
+                          <th className="w-5 px-1 py-2"></th>
                           <th className="px-3 py-2">Code</th>
                           <th className="px-3 py-2">Severity</th>
                           <th className="px-3 py-2">Category</th>
-                          <th className="px-3 py-2">Description</th>
+                          <th className="px-3 py-2">If Approved</th>
                           <th className="px-3 py-2">Context</th>
                           <th className="px-3 py-2">Status</th>
                           <th className="px-3 py-2 text-right">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {reviewIssues.map((issue) => (
+                        {reviewIssues.map((issue) => {
+                          const isExpanded = expandedIssueId === issue.id;
+                          return (
+                          <React.Fragment key={issue.id}>
                           <tr
-                            key={issue.id}
-                            className={`hover:bg-gray-50/50 ${issue.resolution ? 'opacity-60' : ''}`}
+                            className={`hover:bg-gray-50/50 cursor-pointer ${issue.resolution ? 'opacity-60' : ''} ${isExpanded ? 'bg-brennan-light/30' : ''}`}
+                            onClick={() => setExpandedIssueId(isExpanded ? null : issue.id)}
                           >
+                            <td className="px-1 py-2 text-center text-gray-400">
+                              <svg className={`h-3.5 w-3.5 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                              </svg>
+                            </td>
                             <td className="px-3 py-2 font-mono font-medium">{issue.code}</td>
                             <td className="px-3 py-2">
                               <SeverityBadge severity={issue.severity} />
                             </td>
                             <td className="px-3 py-2 font-medium text-gray-700">{issue.category}</td>
-                            <td className="px-3 py-2 text-gray-600 max-w-md">{issue.description}</td>
+                            <td className="px-3 py-2 text-gray-500">
+                              <CommitConsequenceLabel issue={issue} />
+                            </td>
                             <td className="px-3 py-2">
                               <IssueContextLinks issue={issue} />
                             </td>
@@ -975,16 +1031,11 @@ export default function ReconciliationPageClient({
                                 <span className="text-gray-400 italic">pending</span>
                               )}
                             </td>
-                            <td className="px-3 py-2 text-right">
+                            <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
                               {issue.resolution ? (
-                                <button
-                                  onClick={() => handleResolve(issue.id, '')}
-                                  className="text-xs text-gray-400 hover:text-gray-600 underline"
-                                  title="Clear resolution to re-decide"
-                                  disabled
-                                >
+                                <span className="text-xs text-gray-400">
                                   {issue.resolvedBy?.displayName || ''}
-                                </button>
+                                </span>
                               ) : (
                                 <div className="flex items-center justify-end gap-1">
                                   <button
@@ -1018,7 +1069,16 @@ export default function ReconciliationPageClient({
                               )}
                             </td>
                           </tr>
-                        ))}
+                          {isExpanded && (
+                            <tr>
+                              <td colSpan={8} className="bg-gray-50/80 px-0 py-0">
+                                <IssueDetailPanel issue={issue} />
+                              </td>
+                            </tr>
+                          )}
+                          </React.Fragment>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1324,13 +1384,22 @@ export default function ReconciliationPageClient({
                           </div>
                         )}
                         {run.status === "committed" && (
-                          <button
-                            onClick={() => handleReview(run.id)}
-                            disabled={loadingReview}
-                            className="rounded border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                          >
-                            View
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleReview(run.id)}
+                              disabled={loadingReview}
+                              className="rounded border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              View
+                            </button>
+                            <a
+                              href={`/api/export/reconciliation-run/${run.id}`}
+                              download
+                              className="rounded border border-brennan-border px-3 py-1 text-xs font-medium text-brennan-blue hover:bg-brennan-light transition-colors"
+                            >
+                              Export
+                            </a>
+                          </div>
                         )}
                       </div>
                     </td>
@@ -1403,9 +1472,385 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 /**
+ * Durable run outcome panel — shown when viewing a committed run.
+ * Reads from the persisted commitSummary field, not ephemeral state.
+ */
+function RunOutcomePanel({ run }: { run: ReconciliationRun }) {
+  const cs = run.commitSummary;
+  const hasDataChanges = cs && (cs.recordsCreated > 0 || cs.recordsSuperseded > 0 || cs.recordsUpdated > 0 || cs.itemsCreated > 0);
+
+  return (
+    <div className="mb-4 rounded-lg border border-green-200 bg-green-50/50 p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+          <h3 className="text-sm font-bold text-green-800">Run Committed</h3>
+        </div>
+        {run.completedAt && (
+          <span className="text-xs text-green-600">
+            {formatDate(run.completedAt)}
+          </span>
+        )}
+      </div>
+
+      {/* Run context */}
+      <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4">
+        <div>
+          <span className="text-green-600">Distributor</span>
+          <p className="font-medium text-green-900">{run.distributor.code}</p>
+        </div>
+        <div>
+          <span className="text-green-600">Claim Period</span>
+          <p className="font-medium text-green-900">{formatPeriod(run.claimPeriodStart)}</p>
+        </div>
+        <div>
+          <span className="text-green-600">Total Claim Lines</span>
+          <p className="font-medium text-green-900">{run.totalClaimLines}</p>
+        </div>
+        <div>
+          <span className="text-green-600">Exceptions</span>
+          <p className="font-medium text-green-900">{run.exceptionCount}</p>
+        </div>
+      </div>
+
+      {/* Resolution breakdown */}
+      {cs && (
+        <div className="mt-3 border-t border-green-200 pt-3">
+          <p className="text-xs font-medium text-green-800 mb-2">Resolution Summary</p>
+          <div className="flex flex-wrap gap-3 text-xs">
+            {cs.totalApproved > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+                <span className="text-green-800 font-medium">{cs.totalApproved} approved</span>
+              </span>
+            )}
+            {cs.rejected > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <span className="inline-block h-2 w-2 rounded-full bg-red-400" />
+                <span className="text-red-700 font-medium">{cs.rejected} rejected</span>
+              </span>
+            )}
+            {cs.dismissed > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <span className="inline-block h-2 w-2 rounded-full bg-gray-400" />
+                <span className="text-gray-600 font-medium">{cs.dismissed} dismissed</span>
+              </span>
+            )}
+            {cs.deferred > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <span className="inline-block h-2 w-2 rounded-full bg-amber-400" />
+                <span className="text-amber-700 font-medium">{cs.deferred} deferred</span>
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Master data changes */}
+      {hasDataChanges && (
+        <div className="mt-3 border-t border-green-200 pt-3">
+          <p className="text-xs font-medium text-green-800 mb-2">Master Data Changes</p>
+          <div className="flex flex-wrap gap-3 text-xs">
+            {cs.recordsCreated > 0 && (
+              <span className="rounded bg-green-100 px-2 py-0.5 font-medium text-green-800">
+                {cs.recordsCreated} record{cs.recordsCreated !== 1 ? "s" : ""} created
+              </span>
+            )}
+            {cs.recordsSuperseded > 0 && (
+              <span className="rounded bg-orange-100 px-2 py-0.5 font-medium text-orange-800">
+                {cs.recordsSuperseded} superseded
+              </span>
+            )}
+            {cs.recordsUpdated > 0 && (
+              <span className="rounded bg-blue-100 px-2 py-0.5 font-medium text-blue-800">
+                {cs.recordsUpdated} updated
+              </span>
+            )}
+            {cs.itemsCreated > 0 && (
+              <span className="rounded bg-purple-100 px-2 py-0.5 font-medium text-purple-800">
+                {cs.itemsCreated} item{cs.itemsCreated !== 1 ? "s" : ""} created
+              </span>
+            )}
+            {cs.confirmed > 0 && (
+              <span className="rounded bg-gray-100 px-2 py-0.5 font-medium text-gray-700">
+                {cs.confirmed} confirmed (no change)
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* No monetary totals — approvedAmount/rejectedAmount are not yet populated */}
+    </div>
+  );
+}
+
+/**
  * Renders contextual deep links for a reconciliation issue.
  * Links to the relevant contract detail page and/or records workspace.
  */
+// ---------------------------------------------------------------------------
+// Commit consequence label — tells the reviewer what approving will do
+// ---------------------------------------------------------------------------
+function CommitConsequenceLabel({ issue }: { issue: DbIssue }) {
+  const sd = issue.suggestedData;
+  const code = issue.code;
+
+  if (code === "CLM-001") {
+    const oldPrice = sd?.oldPrice as number | undefined;
+    const newPrice = sd?.newPrice as number | undefined;
+    if (oldPrice != null && newPrice != null) {
+      return (
+        <span className="text-amber-700">
+          Update price ${oldPrice.toFixed(2)} → ${newPrice.toFixed(2)}
+        </span>
+      );
+    }
+    return <span className="text-amber-700">Update master record price</span>;
+  }
+
+  if (code === "CLM-003") {
+    return <span className="text-blue-700">Add item to contract plan</span>;
+  }
+
+  if (code === "CLM-004") {
+    return <span className="text-red-700">Contract not found — manual review</span>;
+  }
+
+  if (code === "CLM-006") {
+    return <span className="text-blue-700">Create new item + record</span>;
+  }
+
+  if (code === "CLM-005") {
+    return <span className="text-amber-700">Ambiguous match — pick plan</span>;
+  }
+
+  if (code === "CLM-007") {
+    return <span className="text-red-700">Contract date issue — reject likely</span>;
+  }
+
+  if (code === "CLM-009") {
+    return <span className="text-gray-500">Possible duplicate — dismiss or reject</span>;
+  }
+
+  // CLM-002, CLM-008, CLM-010, CLM-011, CLM-012 — informational
+  if (issue.severity === "warning") {
+    return <span className="text-gray-500">Informational — no master data change</span>;
+  }
+
+  return <span className="text-gray-400">—</span>;
+}
+
+// ---------------------------------------------------------------------------
+// Expandable issue detail panel — shows claim row + master data context
+// ---------------------------------------------------------------------------
+function IssueDetailPanel({ issue }: { issue: DbIssue }) {
+  const sd = issue.suggestedData;
+  const cr = issue.claimRow;
+
+  return (
+    <div className="px-8 py-3 space-y-3 border-t border-gray-200">
+      {/* Description */}
+      <p className="text-xs text-gray-600">{issue.description}</p>
+
+      <div className="grid grid-cols-2 gap-4">
+        {/* Left: Claim row data */}
+        <div>
+          <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Claim Data</h4>
+          {cr ? (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+              <DetailField label="Row" value={`#${cr.rowNumber}`} />
+              <DetailField label="Contract" value={cr.contractNumber} />
+              <DetailField label="Plan Code" value={cr.planCode} />
+              <DetailField label="Item" value={cr.itemNumber} />
+              <DetailField label="Claimed Price" value={cr.deviatedPrice != null ? `$${cr.deviatedPrice.toFixed(2)}` : null} />
+              <DetailField label="Quantity" value={cr.quantity != null ? String(cr.quantity) : null} />
+              {cr.claimedAmount != null && (
+                <DetailField label="Line Amount" value={`$${cr.claimedAmount.toFixed(2)}`} />
+              )}
+              {cr.transactionDate && (
+                <DetailField label="Trans. Date" value={new Date(cr.transactionDate).toLocaleDateString()} />
+              )}
+              {cr.endUserCode && (
+                <DetailField label="End User" value={`${cr.endUserCode}${cr.endUserName ? ` — ${cr.endUserName}` : ''}`} />
+              )}
+              {cr.distributorOrderNumber && (
+                <DetailField label="Order #" value={cr.distributorOrderNumber} />
+              )}
+            </dl>
+          ) : (
+            <p className="text-xs text-gray-400 italic">No claim row data available</p>
+          )}
+        </div>
+
+        {/* Right: Master data / comparison context (varies by issue type) */}
+        <div>
+          <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+            {issue.code === "CLM-001" ? "Price Comparison" :
+             issue.code === "CLM-003" ? "Contract Context" :
+             issue.code === "CLM-006" ? "Resolution Detail" :
+             "Master Data"}
+          </h4>
+          <IssueTypeDetail issue={issue} />
+        </div>
+      </div>
+
+      {/* Resolution note if present */}
+      {issue.resolutionNote && (
+        <div className="text-xs">
+          <span className="font-medium text-gray-500">Note: </span>
+          <span className="text-gray-600">{issue.resolutionNote}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetailField({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <>
+      <dt className="text-gray-400 whitespace-nowrap">{label}</dt>
+      <dd className="text-gray-700 font-medium">{value || <span className="text-gray-300 font-normal">—</span>}</dd>
+    </>
+  );
+}
+
+// Issue-type-specific detail for the right column of the expanded panel
+function IssueTypeDetail({ issue }: { issue: DbIssue }) {
+  const sd = issue.suggestedData;
+
+  if (issue.code === "CLM-001" && sd) {
+    // Price mismatch: show side-by-side comparison
+    const oldPrice = sd.oldPrice as number | undefined;
+    const newPrice = sd.newPrice as number | undefined;
+    return (
+      <div className="space-y-2">
+        {oldPrice != null && newPrice != null && (
+          <div className="flex items-center gap-3">
+            <div className="rounded border border-gray-200 bg-white px-3 py-1.5 text-center">
+              <div className="text-[10px] text-gray-400 uppercase">Contract</div>
+              <div className="text-sm font-semibold text-gray-700">${oldPrice.toFixed(4)}</div>
+            </div>
+            <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+            </svg>
+            <div className="rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-center">
+              <div className="text-[10px] text-amber-600 uppercase">Claimed</div>
+              <div className="text-sm font-semibold text-amber-700">${newPrice.toFixed(4)}</div>
+            </div>
+            <div className="text-xs text-gray-400">
+              diff ${Math.abs(newPrice - oldPrice).toFixed(4)}
+            </div>
+          </div>
+        )}
+        {issue.masterRecordId && (
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+            <DetailField label="Master Record" value={`#${issue.masterRecordId}`} />
+            {sd.planId != null && <DetailField label="Plan ID" value={`#${sd.planId}`} />}
+          </dl>
+        )}
+        <p className="text-xs text-amber-600">
+          If approved: {issue.masterRecordId ? 'supersede or update existing record at claimed price' : 'update contract price'}
+        </p>
+      </div>
+    );
+  }
+
+  if (issue.code === "CLM-003" && sd) {
+    // Item not in contract
+    const candidatePlanIds = sd.candidatePlanIds as number[] | undefined;
+    return (
+      <div className="space-y-1.5">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+          {sd.contractId != null && <DetailField label="Contract ID" value={`#${sd.contractId}`} />}
+          {sd.itemId != null && <DetailField label="Item ID" value={`#${sd.itemId}`} />}
+          {sd.planId != null && <DetailField label="Target Plan" value={`#${sd.planId}`} />}
+          {sd.claimedPrice != null && <DetailField label="Claimed Price" value={`$${(sd.claimedPrice as number).toFixed(4)}`} />}
+          {candidatePlanIds && candidatePlanIds.length > 1 && (
+            <DetailField label="Available Plans" value={candidatePlanIds.map(id => `#${id}`).join(', ')} />
+          )}
+        </dl>
+        <p className="text-xs text-blue-600">
+          If approved: create new rebate record under {sd.planId != null ? `plan #${sd.planId}` : 'contract plan'} at claimed price
+        </p>
+      </div>
+    );
+  }
+
+  if (issue.code === "CLM-006" && sd) {
+    // Unknown item
+    return (
+      <div className="space-y-1.5">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+          <DetailField label="Item Number" value={sd.itemNumber as string | undefined} />
+          {sd.contractNumber != null && <DetailField label="Contract" value={String(sd.contractNumber)} />}
+          {sd.claimedPrice != null && <DetailField label="Claimed Price" value={`$${(sd.claimedPrice as number).toFixed(4)}`} />}
+        </dl>
+        <p className="text-xs text-blue-600">
+          If approved: create new item &quot;{String(sd.itemNumber)}&quot; + rebate record at claimed price
+        </p>
+      </div>
+    );
+  }
+
+  if (issue.code === "CLM-004" && sd) {
+    // Contract not found
+    return (
+      <div className="space-y-1.5">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+          <DetailField label="Searched For" value={sd.contractNumber as string | undefined} />
+        </dl>
+        <p className="text-xs text-red-600">
+          No matching contract found for this distributor. Verify the contract number or create the contract first.
+        </p>
+      </div>
+    );
+  }
+
+  if (issue.code === "CLM-005" && sd) {
+    // Ambiguous plan match
+    const candidateIds = sd.candidateRecordIds as number[] | undefined;
+    return (
+      <div className="space-y-1.5">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+          {sd.contractId != null && <DetailField label="Contract ID" value={`#${sd.contractId}`} />}
+          {candidateIds && <DetailField label="Candidate Records" value={candidateIds.map(id => `#${id}`).join(', ')} />}
+        </dl>
+        <p className="text-xs text-amber-600">
+          Multiple plan/price matches found. Review and resolve manually — may need to specify the correct plan.
+        </p>
+      </div>
+    );
+  }
+
+  if (issue.code === "CLM-007") {
+    // Contract expired / not yet effective
+    return (
+      <div>
+        <p className="text-xs text-red-600">
+          Transaction date falls outside the contract&apos;s effective period. Typically rejected unless the contract dates need correction.
+        </p>
+      </div>
+    );
+  }
+
+  // Default for informational issues (CLM-002, CLM-008, CLM-009, CLM-010-012)
+  if (issue.masterRecordId) {
+    return (
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+        <DetailField label="Master Record" value={`#${issue.masterRecordId}`} />
+        {issue.committedRecordId && issue.committedRecordId !== issue.masterRecordId && (
+          <DetailField label="Committed Record" value={`#${issue.committedRecordId}`} />
+        )}
+      </dl>
+    );
+  }
+
+  return <p className="text-xs text-gray-400 italic">No additional context for this issue type</p>;
+}
+
 function IssueContextLinks({ issue }: { issue: DbIssue }) {
   const sd = issue.suggestedData;
   const contractId = sd?.contractId as number | null | undefined;
@@ -1429,9 +1874,23 @@ function IssueContextLinks({ issue }: { issue: DbIssue }) {
     });
   }
 
-  // Note: masterRecordId and committedRecordId are available on issues but
-  // the Records page has no record-ID filter. Deep link deferred until a
-  // record detail view or ID-based filter is added.
+  // Link to the matched master record (existing record found during validation)
+  if (issue.masterRecordId) {
+    links.push({
+      label: "Record",
+      href: `/records/${issue.masterRecordId}`,
+      title: `View matched record #${issue.masterRecordId}`,
+    });
+  }
+
+  // Link to the committed record (created/updated during commit)
+  if (issue.committedRecordId && issue.committedRecordId !== issue.masterRecordId) {
+    links.push({
+      label: "Committed",
+      href: `/records/${issue.committedRecordId}`,
+      title: `View committed record #${issue.committedRecordId}`,
+    });
+  }
 
   if (links.length === 0) {
     return <span className="text-gray-300">—</span>;
@@ -1443,8 +1902,6 @@ function IssueContextLinks({ issue }: { issue: DbIssue }) {
         <a
           key={link.label}
           href={link.href}
-          target="_blank"
-          rel="noopener noreferrer"
           title={link.title}
           className="inline-flex items-center gap-0.5 rounded bg-brennan-blue/10 px-1.5 py-0.5 text-xs font-medium text-brennan-blue hover:bg-brennan-blue/20 transition-colors"
         >
