@@ -290,11 +290,14 @@ function ItemsSection() {
     id: number; itemNumber: string; description: string | null; productCode: string | null; isActive: boolean;
   }>("items");
   const [editId, setEditId] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
 
   return (
     <EntityTable
       loading={loading}
       columns={["Item #", "Description", "Product Code", "Status", ""]}
+      onNew={() => setCreating(true)}
+      newLabel="New Item"
     >
       {data.map((item) => (
         <tr key={item.id} className="border-b border-brennan-border hover:bg-brennan-light/40">
@@ -309,6 +312,19 @@ function ItemsSection() {
       ))}
       {editId && (
         <EditModal type="item" id={editId} onClose={() => setEditId(null)} onSaved={refresh} />
+      )}
+      {creating && (
+        <CreateModal
+          title="New Item"
+          fields={[
+            { key: "itemNumber", label: "Item Number", required: true },
+            { key: "description", label: "Description" },
+            { key: "productCode", label: "Product Code" },
+          ]}
+          apiPath="items"
+          onClose={() => setCreating(false)}
+          onSaved={refresh}
+        />
       )}
     </EntityTable>
   );

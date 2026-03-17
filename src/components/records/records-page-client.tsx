@@ -614,7 +614,7 @@ function EntityEditModal({
   const apiPath = type === "endUser" ? "end-users" : type === "plan" ? "plans" : `${type}s`;
 
   // Fetch entity on mount
-  useState(() => {
+  useEffect(() => {
     fetch(`/api/${apiPath}/${id}`)
       .then((res) => (res.ok ? res.json() : Promise.reject("Not found")))
       .then((d) => {
@@ -626,7 +626,7 @@ function EntityEditModal({
         setError("Failed to load");
         setLoading(false);
       });
-  });
+  }, [apiPath, id]);
 
   async function handleSave() {
     setSaving(true);
