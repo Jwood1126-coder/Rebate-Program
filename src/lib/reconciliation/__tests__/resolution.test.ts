@@ -1,14 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
-// Mock Prisma + Audit
+// Mock Prisma
 // ---------------------------------------------------------------------------
-const { mockPrisma, mockAudit } = vi.hoisted(() => {
+const { mockPrisma } = vi.hoisted(() => {
   const txMethods = {
     reconciliationIssue: {
+      findMany: vi.fn(),
+      update: vi.fn(),
       updateMany: vi.fn(),
     },
     reconciliationRun: {
+      findUnique: vi.fn(),
       update: vi.fn(),
     },
     auditLog: {
@@ -33,15 +36,10 @@ const { mockPrisma, mockAudit } = vi.hoisted(() => {
       }),
       _tx: txMethods,
     },
-    mockAudit: {
-      logUpdate: vi.fn(),
-      logCreate: vi.fn(),
-    },
   };
 });
 
 vi.mock('@/lib/db/client', () => ({ prisma: mockPrisma }));
-vi.mock('@/lib/audit/audit.service', () => ({ auditService: mockAudit }));
 
 import { resolveIssue, bulkResolveIssues, reopenRun, getRunProgress } from '../resolution.service';
 
@@ -68,6 +66,9 @@ function makeIssue(overrides: Record<string, unknown> = {}) {
 
 function resetMocks() {
   vi.clearAllMocks();
+  // Default: inner lock check inside transaction sees a "review" run (not locked).
+  // Tests that simulate a race override this per-test.
+  mockPrisma._tx.reconciliationRun.findUnique.mockResolvedValue({ status: 'review' });
 }
 
 // ---------------------------------------------------------------------------
@@ -79,16 +80,19 @@ describe('resolveIssue', () => {
 
   it('resolves an issue and returns progress', async () => {
     mockPrisma.reconciliationIssue.findUnique.mockResolvedValue(makeIssue());
-    mockPrisma.reconciliationIssue.update.mockResolvedValue({
+    // All mutations now happen inside transaction
+    const tx = mockPrisma._tx;
+    tx.reconciliationIssue.update.mockResolvedValue({
       id: 1,
       resolution: 'approved',
       resolvedAt: new Date(),
     });
-    // getRunProgress needs findMany
-    mockPrisma.reconciliationIssue.findMany.mockResolvedValue([
+    // getRunProgress reads inside tx
+    tx.reconciliationIssue.findMany.mockResolvedValue([
       { resolution: 'approved' },
     ]);
-    mockPrisma.reconciliationRun.update.mockResolvedValue({});
+    tx.reconciliationRun.update.mockResolvedValue({});
+    tx.auditLog.create.mockResolvedValue({});
 
     const result = await resolveIssue(1, {
       resolution: 'approved',
@@ -98,32 +102,37 @@ describe('resolveIssue', () => {
     expect(result.success).toBe(true);
     expect(result.issue?.resolution).toBe('approved');
     expect(result.runProgress?.allResolved).toBe(true);
+    // All writes happen inside a transaction
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('audits the resolution change', async () => {
+  it('audits the resolution change inside transaction', async () => {
     mockPrisma.reconciliationIssue.findUnique.mockResolvedValue(makeIssue());
-    mockPrisma.reconciliationIssue.update.mockResolvedValue({
+    const tx = mockPrisma._tx;
+    tx.reconciliationIssue.update.mockResolvedValue({
       id: 1,
       resolution: 'rejected',
       resolvedAt: new Date(),
     });
-    mockPrisma.reconciliationIssue.findMany.mockResolvedValue([
+    tx.reconciliationIssue.findMany.mockResolvedValue([
       { resolution: 'rejected' },
     ]);
-    mockPrisma.reconciliationRun.update.mockResolvedValue({});
+    tx.reconciliationRun.update.mockResolvedValue({});
+    tx.auditLog.create.mockResolvedValue({});
 
     await resolveIssue(1, { resolution: 'rejected', resolvedById: 5 });
 
-    expect(mockAudit.logUpdate).toHaveBeenCalledWith(
-      'reconciliation_issues',
-      1,
-      expect.objectContaining({ resolution: null }),
-      expect.objectContaining({ resolution: 'rejected' }),
-      5,
-    );
+    expect(tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tableName: 'reconciliation_issues',
+        recordId: 1,
+        action: 'UPDATE',
+        userId: 5,
+      }),
+    });
   });
 
-  it('rejects resolution on a committed run', async () => {
+  it('rejects resolution on a committed run (no transaction entered)', async () => {
     mockPrisma.reconciliationIssue.findUnique.mockResolvedValue(
       makeIssue({ reconciliationRun: { id: 10, status: 'committed' } }),
     );
@@ -135,9 +144,10 @@ describe('resolveIssue', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/committed/i);
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('rejects resolution on a cancelled run', async () => {
+  it('rejects resolution on a cancelled run (no transaction entered)', async () => {
     mockPrisma.reconciliationIssue.findUnique.mockResolvedValue(
       makeIssue({ reconciliationRun: { id: 10, status: 'cancelled' } }),
     );
@@ -149,6 +159,7 @@ describe('resolveIssue', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/cancelled/i);
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
   // --- Run scoping ---
@@ -169,15 +180,17 @@ describe('resolveIssue', () => {
 
   it('accepts issue that belongs to the expected run', async () => {
     mockPrisma.reconciliationIssue.findUnique.mockResolvedValue(makeIssue());
-    mockPrisma.reconciliationIssue.update.mockResolvedValue({
+    const tx = mockPrisma._tx;
+    tx.reconciliationIssue.update.mockResolvedValue({
       id: 1,
       resolution: 'approved',
       resolvedAt: new Date(),
     });
-    mockPrisma.reconciliationIssue.findMany.mockResolvedValue([
+    tx.reconciliationIssue.findMany.mockResolvedValue([
       { resolution: 'approved' },
     ]);
-    mockPrisma.reconciliationRun.update.mockResolvedValue({});
+    tx.reconciliationRun.update.mockResolvedValue({});
+    tx.auditLog.create.mockResolvedValue({});
 
     const result = await resolveIssue(1, {
       resolution: 'approved',
@@ -189,54 +202,92 @@ describe('resolveIssue', () => {
 
   // --- Status transitions ---
 
-  it('sets run to reviewed when last issue is resolved', async () => {
+  it('sets run to reviewed when last issue is resolved (inside tx)', async () => {
     mockPrisma.reconciliationIssue.findUnique.mockResolvedValue(makeIssue());
-    mockPrisma.reconciliationIssue.update.mockResolvedValue({
+    const tx = mockPrisma._tx;
+    tx.reconciliationIssue.update.mockResolvedValue({
       id: 1,
       resolution: 'dismissed',
       resolvedAt: new Date(),
     });
     // All resolved
-    mockPrisma.reconciliationIssue.findMany.mockResolvedValue([
+    tx.reconciliationIssue.findMany.mockResolvedValue([
       { resolution: 'dismissed' },
     ]);
-    mockPrisma.reconciliationRun.update.mockResolvedValue({});
+    tx.reconciliationRun.update.mockResolvedValue({});
+    tx.auditLog.create.mockResolvedValue({});
 
     await resolveIssue(1, { resolution: 'dismissed', resolvedById: 5 });
 
-    expect(mockPrisma.reconciliationRun.update).toHaveBeenCalledWith(
+    expect(tx.reconciliationRun.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: 'reviewed' }),
       }),
     );
   });
 
-  it('reverts run from reviewed to review when resolution is changed', async () => {
+  it('reverts run from reviewed to review when resolution is changed (inside tx)', async () => {
     mockPrisma.reconciliationIssue.findUnique.mockResolvedValue(
       makeIssue({
         resolution: 'approved',
         reconciliationRun: { id: 10, status: 'reviewed' },
       }),
     );
-    mockPrisma.reconciliationIssue.update.mockResolvedValue({
+    const tx = mockPrisma._tx;
+    tx.reconciliationIssue.update.mockResolvedValue({
       id: 1,
       resolution: 'rejected',
       resolvedAt: new Date(),
     });
-    // Still all resolved, but run was "reviewed" before
-    mockPrisma.reconciliationIssue.findMany.mockResolvedValue([
+    // Not all resolved — run was "reviewed" before
+    tx.reconciliationIssue.findMany.mockResolvedValue([
       { resolution: 'rejected' },
       { resolution: null }, // another pending issue
     ]);
+    tx.auditLog.create.mockResolvedValue({});
 
     await resolveIssue(1, { resolution: 'rejected', resolvedById: 5 });
 
     // Run should revert to 'review' since not all resolved anymore
-    expect(mockPrisma.reconciliationRun.update).toHaveBeenCalledWith(
+    expect(tx.reconciliationRun.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: 'review', completedAt: null }),
       }),
     );
+  });
+
+  // --- Preflight race guard ---
+
+  it('rejects if run became committed between preflight and transaction', async () => {
+    // Preflight sees review status
+    mockPrisma.reconciliationIssue.findUnique.mockResolvedValue(makeIssue());
+    // But inside the transaction, the run is now committed (concurrent commit happened)
+    mockPrisma._tx.reconciliationRun.findUnique.mockResolvedValue({ status: 'committed' });
+
+    const result = await resolveIssue(1, {
+      resolution: 'approved',
+      resolvedById: 5,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/committed/i);
+    // Transaction was entered but rolled back
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    // No issue update should have happened
+    expect(mockPrisma._tx.reconciliationIssue.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects if run became cancelled between preflight and transaction', async () => {
+    mockPrisma.reconciliationIssue.findUnique.mockResolvedValue(makeIssue());
+    mockPrisma._tx.reconciliationRun.findUnique.mockResolvedValue({ status: 'cancelled' });
+
+    const result = await resolveIssue(1, {
+      resolution: 'approved',
+      resolvedById: 5,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/cancelled/i);
   });
 });
 
@@ -260,6 +311,7 @@ describe('bulkResolveIssues', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/different runs/i);
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('rejects if issues do not belong to expected run', async () => {
@@ -275,9 +327,10 @@ describe('bulkResolveIssues', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/do not belong/i);
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('rejects if run is committed', async () => {
+  it('rejects if run is committed (no transaction entered)', async () => {
     mockPrisma.reconciliationIssue.findMany.mockResolvedValueOnce([
       { id: 1, reconciliationRunId: 10, resolution: null },
     ]);
@@ -290,28 +343,54 @@ describe('bulkResolveIssues', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/committed/i);
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('audits each resolution individually', async () => {
-    mockPrisma.reconciliationIssue.findMany
-      .mockResolvedValueOnce([
-        { id: 1, reconciliationRunId: 10, resolution: null },
-        { id: 2, reconciliationRunId: 10, resolution: 'deferred' },
-      ])
-      .mockResolvedValueOnce([
-        { resolution: 'approved' },
-        { resolution: 'approved' },
-      ]);
+  it('audits each resolution inside transaction', async () => {
+    mockPrisma.reconciliationIssue.findMany.mockResolvedValueOnce([
+      { id: 1, reconciliationRunId: 10, resolution: null },
+      { id: 2, reconciliationRunId: 10, resolution: 'deferred' },
+    ]);
     mockPrisma.reconciliationRun.findUnique.mockResolvedValue({ status: 'review' });
-    mockPrisma.reconciliationIssue.updateMany.mockResolvedValue({ count: 2 });
-    mockPrisma.reconciliationRun.update.mockResolvedValue({});
+
+    const tx = mockPrisma._tx;
+    tx.reconciliationIssue.updateMany.mockResolvedValue({ count: 2 });
+    tx.reconciliationIssue.findMany.mockResolvedValue([
+      { resolution: 'approved' },
+      { resolution: 'approved' },
+    ]);
+    tx.reconciliationRun.update.mockResolvedValue({});
+    tx.auditLog.create.mockResolvedValue({});
 
     await bulkResolveIssues([1, 2], {
       resolution: 'approved',
       resolvedById: 5,
     });
 
-    expect(mockAudit.logUpdate).toHaveBeenCalledTimes(2);
+    // All writes happen in a single transaction
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    // One audit entry per issue, inside the transaction
+    expect(tx.auditLog.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects if run became committed between preflight and transaction (race guard)', async () => {
+    mockPrisma.reconciliationIssue.findMany.mockResolvedValueOnce([
+      { id: 1, reconciliationRunId: 10, resolution: null },
+    ]);
+    // Preflight sees review status
+    mockPrisma.reconciliationRun.findUnique.mockResolvedValue({ status: 'review' });
+    // Inside tx, run is now committed
+    mockPrisma._tx.reconciliationRun.findUnique.mockResolvedValue({ status: 'committed' });
+
+    const result = await bulkResolveIssues([1], {
+      resolution: 'approved',
+      resolvedById: 5,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/committed/i);
+    // Transaction was entered but rolled back — no issue updates
+    expect(mockPrisma._tx.reconciliationIssue.updateMany).not.toHaveBeenCalled();
   });
 });
 

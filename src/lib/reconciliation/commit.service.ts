@@ -30,6 +30,7 @@ export interface CommitResult {
     totalApproved: number;
     recordsCreated: number;
     recordsSuperseded: number;
+    recordsUpdated: number;
     itemsCreated: number;
     confirmed: number;
     rejected: number;
@@ -101,6 +102,7 @@ export async function commitRun(runId: number, userId: number): Promise<CommitRe
         totalApproved: 0,
         recordsCreated: 0,
         recordsSuperseded: 0,
+        recordsUpdated: 0,
         itemsCreated: 0,
         confirmed: 0,
         rejected: rejectedCount,
@@ -115,6 +117,7 @@ export async function commitRun(runId: number, userId: number): Promise<CommitRe
     const txResult = await prisma.$transaction(async (tx: TxClient) => {
       let recordsCreated = 0;
       let recordsSuperseded = 0;
+      let recordsUpdated = 0;
       let itemsCreated = 0;
       let confirmed = 0;
 
@@ -172,7 +175,7 @@ export async function commitRun(runId: number, userId: number): Promise<CommitRe
                 { rebatePrice: newPrice },
               ), userId);
 
-            recordsSuperseded++;
+            recordsUpdated++;
           } else {
             // Standard supersession: end-date old, create new
             const dayBefore = new Date(claimPeriodStart);
@@ -410,7 +413,7 @@ export async function commitRun(runId: number, userId: number): Promise<CommitRe
           { status: 'committed', recordsCreated, recordsSuperseded, itemsCreated, confirmed },
         ), userId);
 
-      return { recordsCreated, recordsSuperseded, itemsCreated, confirmed };
+      return { recordsCreated, recordsSuperseded, recordsUpdated, itemsCreated, confirmed };
     });
 
     return {
@@ -463,6 +466,7 @@ function emptySummary(
     totalApproved,
     recordsCreated: 0,
     recordsSuperseded: 0,
+    recordsUpdated: 0,
     itemsCreated: 0,
     confirmed: 0,
     rejected,

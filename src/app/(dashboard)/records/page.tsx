@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db/client";
 import { Prisma } from "@prisma/client";
 import { deriveRecordStatus } from "@/lib/utils/dates";
+import { buildStatusWhere } from "@/lib/records/status-filter";
 import { RecordsPageClient } from "@/components/records/records-page-client";
 
 export const dynamic = "force-dynamic";
@@ -26,9 +27,12 @@ interface SearchParams {
 /**
  * Build a Prisma WHERE clause from URL search params.
  * All filtering happens server-side — no silent truncation.
+ * Uses AND array to safely combine independent filter conditions.
  */
 function buildWhere(params: SearchParams): Prisma.RebateRecordWhereInput {
-  const where: Prisma.RebateRecordWhereInput = {};
+  const conditions: Prisma.RebateRecordWhereInput[] = [];
+
+  // --- Entity filters (nested through plan → contract → distributor/endUser) ---
   const planWhere: Prisma.RebatePlanWhereInput = {};
   const contractWhere: Prisma.ContractWhereInput = {};
   let hasContractFilter = false;
@@ -60,35 +64,40 @@ function buildWhere(params: SearchParams): Prisma.RebateRecordWhereInput {
   }
 
   if (hasPlanFilter) {
-    where.rebatePlan = planWhere;
+    conditions.push({ rebatePlan: planWhere });
   }
 
+  // --- Derived status filter ---
   if (params.status) {
-    where.status = params.status;
+    conditions.push(buildStatusWhere(params.status));
   }
 
+  // --- Date range filters ---
   if (params.dateFrom) {
-    where.startDate = { gte: new Date(params.dateFrom) };
+    conditions.push({ startDate: { gte: new Date(params.dateFrom) } });
   }
 
   if (params.dateTo) {
-    // Records whose end date is on or before the "to" filter
-    // Records with null end_date are open-ended — include them only if no dateTo filter
-    where.endDate = { lte: new Date(params.dateTo) };
+    conditions.push({ endDate: { lte: new Date(params.dateTo) } });
   }
 
+  // --- Text search ---
   if (params.search) {
     const q = params.search;
-    where.OR = [
-      { item: { itemNumber: { contains: q, mode: "insensitive" } } },
-      { rebatePlan: { planCode: { contains: q, mode: "insensitive" } } },
-      { rebatePlan: { contract: { contractNumber: { contains: q, mode: "insensitive" } } } },
-      { rebatePlan: { contract: { distributor: { code: { contains: q, mode: "insensitive" } } } } },
-      { rebatePlan: { contract: { endUser: { name: { contains: q, mode: "insensitive" } } } } },
-    ];
+    conditions.push({
+      OR: [
+        { item: { itemNumber: { contains: q, mode: "insensitive" } } },
+        { rebatePlan: { planCode: { contains: q, mode: "insensitive" } } },
+        { rebatePlan: { contract: { contractNumber: { contains: q, mode: "insensitive" } } } },
+        { rebatePlan: { contract: { distributor: { code: { contains: q, mode: "insensitive" } } } } },
+        { rebatePlan: { contract: { endUser: { name: { contains: q, mode: "insensitive" } } } } },
+      ],
+    });
   }
 
-  return where;
+  if (conditions.length === 0) return {};
+  if (conditions.length === 1) return conditions[0];
+  return { AND: conditions };
 }
 
 /**

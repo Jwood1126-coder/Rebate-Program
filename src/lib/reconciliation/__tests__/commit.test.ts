@@ -273,7 +273,9 @@ describe('commitRun', () => {
     const result = await commitRun(1, 1);
 
     expect(result.success).toBe(true);
-    expect(result.summary.recordsSuperseded).toBe(1);
+    // In-place update: counts as recordsUpdated, NOT recordsSuperseded
+    expect(result.summary.recordsUpdated).toBe(1);
+    expect(result.summary.recordsSuperseded).toBe(0);
     expect(result.summary.recordsCreated).toBe(0);
 
     // Should NOT create a new record (in-place update)
@@ -632,6 +634,7 @@ describe('commitRun', () => {
       totalApproved: 1,
       recordsCreated: 0,
       recordsSuperseded: 0,
+      recordsUpdated: 0,
       itemsCreated: 0,
       confirmed: 1,
       rejected: 1,

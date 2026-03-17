@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, Suspense, useTransition } from "react";
+import { useState, useCallback, useEffect, useRef, Suspense, useTransition } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { RecordModal } from "./record-modal";
 import { StatusBadge } from "./status-badge";
@@ -458,12 +458,33 @@ function SearchInput({
   onChange: (v: string) => void;
 }) {
   const [local, setLocal] = useState(value);
-  const timerRef = useState<ReturnType<typeof setTimeout> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Resync local state when the URL value changes externally
+  // (e.g., Clear button, back/forward navigation, deep links).
+  // Cancel any pending debounce so a stale onChange doesn't re-apply the old value.
+  useEffect(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setLocal(value);
+  }, [value]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   function handleChange(v: string) {
     setLocal(v);
-    if (timerRef[0]) clearTimeout(timerRef[0]);
-    timerRef[0] = setTimeout(() => onChange(v), 400);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      onChange(v);
+    }, 400);
   }
 
   return (

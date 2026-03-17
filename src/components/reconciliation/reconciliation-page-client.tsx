@@ -145,7 +145,7 @@ export default function ReconciliationPageClient({
   const [committing, setCommitting] = useState(false);
   const [commitResult, setCommitResult] = useState<{
     success: boolean;
-    summary?: { totalApproved: number; recordsCreated: number; recordsSuperseded: number; itemsCreated: number; confirmed: number; rejected: number; dismissed: number; deferred: number };
+    summary?: { totalApproved: number; recordsCreated: number; recordsSuperseded: number; recordsUpdated: number; itemsCreated: number; confirmed: number; rejected: number; dismissed: number; deferred: number };
     error?: string;
     failedIssueId?: number;
   } | null>(null);
@@ -882,7 +882,7 @@ export default function ReconciliationPageClient({
                           <div className="mt-2 rounded border border-green-300 bg-white p-2">
                             <p className="text-xs font-medium text-green-800">Committed to master data</p>
                             <p className="text-xs text-green-700 mt-0.5">
-                              {commitResult.summary?.recordsCreated ?? 0} created, {commitResult.summary?.recordsSuperseded ?? 0} superseded, {commitResult.summary?.itemsCreated ?? 0} items, {commitResult.summary?.confirmed ?? 0} confirmed
+                              {commitResult.summary?.recordsCreated ?? 0} created, {commitResult.summary?.recordsSuperseded ?? 0} superseded, {commitResult.summary?.recordsUpdated ?? 0} updated, {commitResult.summary?.itemsCreated ?? 0} items, {commitResult.summary?.confirmed ?? 0} confirmed
                             </p>
                           </div>
                         ) : commitResult?.error ? (

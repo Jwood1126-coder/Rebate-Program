@@ -9,7 +9,13 @@
 //   - dismissed: Issue acknowledged but no action needed (e.g., warnings)
 
 import { prisma } from '@/lib/db/client';
-import { auditService } from '@/lib/audit/audit.service';
+import type { PrismaClient, Prisma } from '@prisma/client';
+
+// Prisma interactive transaction client
+type TxClient = Omit<
+  PrismaClient,
+  '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+>;
 
 // Statuses that block resolution changes
 const LOCKED_STATUSES = new Set(['committed', 'cancelled']);
@@ -42,12 +48,14 @@ export interface RunProgress {
 /**
  * Resolve a single reconciliation issue.
  * Validates issue belongs to the given run and the run is in a resolvable state.
+ * All mutations (issue update, audit, run status) are atomic within a transaction.
  */
 export async function resolveIssue(
   issueId: number,
   input: ResolveIssueInput,
   expectedRunId?: number,
 ): Promise<ResolveIssueResult> {
+  // Pre-flight: load issue + run status (outside tx — read-only validation)
   const issue = await prisma.reconciliationIssue.findUnique({
     where: { id: issueId },
     include: { reconciliationRun: { select: { id: true, status: true } } },
@@ -72,61 +80,90 @@ export async function resolveIssue(
 
   const previousResolution = issue.resolution;
 
-  // Update the issue with resolution
-  const updated = await prisma.reconciliationIssue.update({
-    where: { id: issueId },
-    data: {
-      resolution: input.resolution,
-      resolutionNote: input.resolutionNote || null,
-      resolvedById: input.resolvedById,
-      resolvedAt: new Date(),
-    },
-  });
+  try {
+    // All mutations inside a single transaction — atomic resolution
+    const { updated, runProgress } = await prisma.$transaction(async (tx) => {
+      // Re-check run status inside transaction to close the preflight race window.
+      // If another user committed/cancelled the run between our preflight and this point,
+      // we'll see the updated status here and bail out safely.
+      const currentRun = await tx.reconciliationRun.findUnique({
+        where: { id: issue.reconciliationRunId },
+        select: { status: true },
+      });
+      if (currentRun && LOCKED_STATUSES.has(currentRun.status)) {
+        throw new LockedRunError(currentRun.status);
+      }
 
-  // Audit the resolution
-  await auditService.logUpdate(
-    'reconciliation_issues',
-    issueId,
-    { resolution: previousResolution, resolutionNote: issue.resolutionNote },
-    { resolution: input.resolution, resolutionNote: input.resolutionNote || null },
-    input.resolvedById,
-  );
+      // Update the issue with resolution
+      const upd = await tx.reconciliationIssue.update({
+        where: { id: issueId },
+        data: {
+          resolution: input.resolution,
+          resolutionNote: input.resolutionNote || null,
+          resolvedById: input.resolvedById,
+          resolvedAt: new Date(),
+        },
+      });
 
-  // Get run progress after resolution
-  const runProgress = await getRunProgress(issue.reconciliationRunId);
+      // Audit the resolution inside transaction
+      await tx.auditLog.create({
+        data: {
+          tableName: 'reconciliation_issues',
+          recordId: issueId,
+          action: 'UPDATE',
+          changedFields: {
+            resolution: { old: previousResolution, new: input.resolution },
+            resolutionNote: { old: issue.resolutionNote, new: input.resolutionNote || null },
+          } as unknown as Prisma.InputJsonValue,
+          userId: input.resolvedById,
+        },
+      });
 
-  // If all issues are resolved, update run status to reviewed
-  if (runProgress.allResolved) {
-    await prisma.reconciliationRun.update({
-      where: { id: issue.reconciliationRunId },
-      data: {
-        status: 'reviewed',
-        completedAt: new Date(),
-        approvedCount: runProgress.breakdown.approved || 0,
-        rejectedCount: runProgress.breakdown.rejected || 0,
+      // Get run progress inside tx (sees the just-updated issue)
+      const progress = await getRunProgress(issue.reconciliationRunId, tx);
+
+      // If all issues are resolved, update run status to reviewed
+      if (progress.allResolved) {
+        await tx.reconciliationRun.update({
+          where: { id: issue.reconciliationRunId },
+          data: {
+            status: 'reviewed',
+            completedAt: new Date(),
+            approvedCount: progress.breakdown.approved || 0,
+            rejectedCount: progress.breakdown.rejected || 0,
+          },
+        });
+      } else if (issue.reconciliationRun.status === 'reviewed') {
+        // If run was reviewed but user changed a resolution, revert to review
+        await tx.reconciliationRun.update({
+          where: { id: issue.reconciliationRunId },
+          data: { status: 'review', completedAt: null },
+        });
+      }
+
+      return { updated: upd, runProgress: progress };
+    });
+
+    return {
+      success: true,
+      issue: {
+        id: updated.id,
+        resolution: updated.resolution!,
+        resolvedAt: updated.resolvedAt!,
       },
-    });
-  } else if (issue.reconciliationRun.status === 'reviewed') {
-    // If run was reviewed but user changed a resolution, revert to review
-    await prisma.reconciliationRun.update({
-      where: { id: issue.reconciliationRunId },
-      data: { status: 'review', completedAt: null },
-    });
+      runProgress,
+    };
+  } catch (err) {
+    if (err instanceof LockedRunError) {
+      return { success: false, error: `Cannot resolve issues on a ${err.status} run` };
+    }
+    throw err;
   }
-
-  return {
-    success: true,
-    issue: {
-      id: updated.id,
-      resolution: updated.resolution!,
-      resolvedAt: updated.resolvedAt!,
-    },
-    runProgress,
-  };
 }
 
 /**
  * Bulk-resolve multiple issues with the same resolution.
+ * All mutations (issue updates, audit entries, run status) are atomic within a transaction.
  */
 export async function bulkResolveIssues(
   issueIds: number[],
@@ -137,7 +174,7 @@ export async function bulkResolveIssues(
     return { success: true, resolvedCount: 0 };
   }
 
-  // Verify all issues exist and belong to the same run
+  // Pre-flight: validate issues exist, belong to same run, run not locked (outside tx)
   const issues = await prisma.reconciliationIssue.findMany({
     where: { id: { in: issueIds } },
     select: { id: true, reconciliationRunId: true, resolution: true },
@@ -172,48 +209,74 @@ export async function bulkResolveIssues(
     };
   }
 
-  // Bulk update
-  await prisma.reconciliationIssue.updateMany({
-    where: { id: { in: issueIds } },
-    data: {
-      resolution: input.resolution,
-      resolutionNote: input.resolutionNote || null,
-      resolvedById: input.resolvedById,
-      resolvedAt: new Date(),
-    },
-  });
-
-  // Audit each resolution change
-  for (const issue of issues) {
-    await auditService.logUpdate(
-      'reconciliation_issues',
-      issue.id,
-      { resolution: issue.resolution },
-      { resolution: input.resolution },
-      input.resolvedById,
-    );
-  }
-
-  const runProgress = await getRunProgress(runId);
-
-  // If all issues are resolved, update run status
-  if (runProgress.allResolved) {
-    await prisma.reconciliationRun.update({
+  // All mutations inside a single transaction
+  try {
+  const runProgress = await prisma.$transaction(async (tx) => {
+    // Re-check run status inside transaction to close preflight race window
+    const currentRun = await tx.reconciliationRun.findUnique({
       where: { id: runId },
+      select: { status: true },
+    });
+    if (currentRun && LOCKED_STATUSES.has(currentRun.status)) {
+      throw new LockedRunError(currentRun.status);
+    }
+
+    // Bulk update issues
+    await tx.reconciliationIssue.updateMany({
+      where: { id: { in: issueIds } },
       data: {
-        status: 'reviewed',
-        completedAt: new Date(),
-        approvedCount: runProgress.breakdown.approved || 0,
-        rejectedCount: runProgress.breakdown.rejected || 0,
+        resolution: input.resolution,
+        resolutionNote: input.resolutionNote || null,
+        resolvedById: input.resolvedById,
+        resolvedAt: new Date(),
       },
     });
-  }
+
+    // Audit each resolution change inside transaction
+    for (const issue of issues) {
+      await tx.auditLog.create({
+        data: {
+          tableName: 'reconciliation_issues',
+          recordId: issue.id,
+          action: 'UPDATE',
+          changedFields: {
+            resolution: { old: issue.resolution, new: input.resolution },
+          } as unknown as Prisma.InputJsonValue,
+          userId: input.resolvedById,
+        },
+      });
+    }
+
+    // Progress check inside tx (sees the just-updated issues)
+    const progress = await getRunProgress(runId, tx);
+
+    // If all issues are resolved, update run status
+    if (progress.allResolved) {
+      await tx.reconciliationRun.update({
+        where: { id: runId },
+        data: {
+          status: 'reviewed',
+          completedAt: new Date(),
+          approvedCount: progress.breakdown.approved || 0,
+          rejectedCount: progress.breakdown.rejected || 0,
+        },
+      });
+    }
+
+    return progress;
+  });
 
   return {
     success: true,
     resolvedCount: issueIds.length,
     runProgress,
   };
+  } catch (err) {
+    if (err instanceof LockedRunError) {
+      return { success: false, resolvedCount: 0, error: `Cannot resolve issues on a ${err.status} run` };
+    }
+    throw err;
+  }
 }
 
 /**
@@ -290,9 +353,11 @@ export async function reopenRun(
 
 /**
  * Get resolution progress for a run.
+ * Accepts optional tx client so it can read inside a transaction (sees uncommitted writes).
  */
-export async function getRunProgress(runId: number): Promise<RunProgress> {
-  const issues = await prisma.reconciliationIssue.findMany({
+export async function getRunProgress(runId: number, db?: TxClient): Promise<RunProgress> {
+  const client = db || prisma;
+  const issues = await client.reconciliationIssue.findMany({
     where: { reconciliationRunId: runId },
     select: { resolution: true },
   });
@@ -329,4 +394,15 @@ export async function getRunIssues(runId: number) {
     },
     orderBy: [{ claimRowId: 'asc' }, { code: 'asc' }],
   });
+}
+
+// ---------------------------------------------------------------------------
+// Internal error for transaction-level locked-run detection
+// ---------------------------------------------------------------------------
+
+class LockedRunError extends Error {
+  constructor(public status: string) {
+    super(`Run is ${status}`);
+    this.name = 'LockedRunError';
+  }
 }
