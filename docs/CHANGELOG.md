@@ -4,6 +4,40 @@ All notable changes to this project are documented in this file, grouped by sess
 
 ---
 
+## 2026-03-16 — Column Mapping Configuration + Contract Wizard + Reconciliation R1-R3
+
+### Column Mapping Configuration (New)
+- New `distributor_column_mappings` DB table for per-distributor, per-file-type mappings
+- Settings → Column Mappings tab: upload sample file → detect columns → map to standard fields → save
+- Auto-suggestion engine matches common header patterns to standard fields
+- Supports claim, contract, and POS file types with configurable date formats
+- Claim parser now reads from DB first with hardcoded FAS/MOTION fallback
+- Reconciliation page links to Settings when distributor has no mapping configured
+
+### Contract Setup Wizard (New)
+- `/contracts/new` — Two-tab wizard: Upload File (primary) + Manual Entry
+- Contract import service: Excel/CSV parsing with flexible header matching
+- Auto-generated 6-digit contract numbers (starting from 100001)
+- Preview before commit pattern — shows grouped contracts with line items
+- Auto-creates end users and items if they don't exist in the system
+- Sample contract file generator (`scripts/generate-sample-contract.ts`)
+
+### Reconciliation Pipeline (Phases R1-R3)
+- **R1 — Staging**: Upload claim file → parse via column mapping → store in claim_rows
+- **R2 — Validation**: Compare claims against contract terms, generate CLM-001 through CLM-011 exceptions
+- **R3 — Exception Resolution**: Individual + bulk approve/reject/dismiss, progress bar, auto-completion
+
+### API Routes (New)
+- `POST /api/contracts/import` — Contract file upload with preview mode
+- `GET/POST /api/distributors/[id]/mappings` — Column mapping CRUD
+- `POST /api/column-mappings/detect-headers` — Sample file header detection
+- `GET /api/column-mappings` — List all configured mappings
+- `GET /api/reconciliation/runs/[id]/issues` — List issues + progress for a run
+- `PATCH /api/reconciliation/runs/[id]/issues/[issueId]` — Resolve individual issue
+- `POST /api/reconciliation/runs/[id]/issues/bulk-resolve` — Bulk resolve issues
+
+---
+
 ## 2026-03-13 — Focused Cleanup: Warnings, Redirect Safety, Docs, Tests
 
 A second focused pass addressing validation warning surfacing, open-redirect hardening, documentation alignment, and integration test coverage.

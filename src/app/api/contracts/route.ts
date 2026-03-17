@@ -26,13 +26,29 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { distributorId, endUserId, contractNumber, description, status } = body;
+  const { distributorId, endUserId, description, status, startDate, endDate } = body;
+  let { contractNumber } = body;
 
-  if (!distributorId || !endUserId || !contractNumber) {
+  if (!distributorId || !endUserId) {
     return NextResponse.json(
-      { error: "Distributor, end user, and contract number are required" },
+      { error: "Distributor and end user are required" },
       { status: 400 }
     );
+  }
+
+  // Auto-generate contract number if not provided or set to "auto"
+  if (!contractNumber || contractNumber === "auto") {
+    const latest = await prisma.contract.findMany({
+      select: { contractNumber: true },
+      orderBy: { contractNumber: "desc" },
+      take: 1,
+    });
+    let nextNum = 100001;
+    if (latest.length > 0) {
+      const highest = parseInt(latest[0].contractNumber, 10);
+      if (!isNaN(highest)) nextNum = highest + 1;
+    }
+    contractNumber = String(nextNum);
   }
 
   const existing = await prisma.contract.findFirst({
@@ -52,6 +68,8 @@ export async function POST(request: NextRequest) {
       contractNumber,
       description: description || null,
       status: status || "active",
+      startDate: startDate ? new Date(startDate) : null,
+      endDate: endDate ? new Date(endDate) : null,
     },
     include: {
       distributor: { select: { code: true, name: true } },

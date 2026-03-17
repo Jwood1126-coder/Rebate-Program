@@ -1,17 +1,22 @@
-// Per-distributor column mapping configuration.
+// Per-distributor column mapping configuration — synchronous, hardcoded defaults.
 // See docs/CLAIM_FILE_SPEC.md Section 4 for mapping details.
 //
-// Each mapping tells the parser which column header in the distributor's file
-// corresponds to which standard field in the system.
+// This file contains ONLY the hardcoded fallback mappings and synchronous getters.
+// For DB-backed async lookups, use column-mappings.server.ts instead.
 //
-// To onboard a new distributor:
-// 1. Get a sample claim file
-// 2. Add a mapping entry here
-// 3. Document in docs/CLAIM_FILE_SPEC.md Section 4
+// To onboard a new distributor via UI:
+// 1. Go to Settings → Column Mappings
+// 2. Select the distributor, upload a sample file
+// 3. Map detected columns to standard fields
+// 4. Save
 
 import type { ColumnMapping } from './types';
 
-export const COLUMN_MAPPINGS: Record<string, ColumnMapping> = {
+// ---------------------------------------------------------------------------
+// Hardcoded defaults (fallback for distributors not yet in the DB)
+// ---------------------------------------------------------------------------
+
+export const HARDCODED_MAPPINGS: Record<string, ColumnMapping> = {
   FAS: {
     distributorCode: 'FAS',
     name: 'Fastenal Claim File',
@@ -53,21 +58,18 @@ export const COLUMN_MAPPINGS: Record<string, ColumnMapping> = {
     },
     dateFormat: 'M/d/yyyy',
   },
-
-  // Additional distributor mappings will be added here as sample files are received.
-  // Expected: HSC, AIT, LGG, TIPCO
 };
 
 /**
- * Get the column mapping for a distributor, or null if not configured.
+ * Synchronous getter — uses hardcoded mappings only.
  */
 export function getColumnMapping(distributorCode: string): ColumnMapping | null {
-  return COLUMN_MAPPINGS[distributorCode.toUpperCase()] ?? null;
+  return HARDCODED_MAPPINGS[distributorCode.toUpperCase()] ?? null;
 }
 
 /**
- * List all configured distributor codes.
+ * Synchronous list of configured distributor codes — hardcoded only.
  */
 export function getConfiguredDistributors(): string[] {
-  return Object.keys(COLUMN_MAPPINGS);
+  return Object.keys(HARDCODED_MAPPINGS);
 }

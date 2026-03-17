@@ -87,6 +87,62 @@ export interface ClaimParseResult {
 }
 
 // ---------------------------------------------------------------------------
+// Standard POS row — the internal representation after column mapping
+// ---------------------------------------------------------------------------
+// POS (Point of Sale) reports come from the distributor and provide
+// supplementary sales data for cross-referencing against claims.
+// POS data is informational — it does not prove sales definitively.
+export interface StandardPosRow {
+  rowNumber: number;
+  // Core matching fields
+  itemNumber: string | null;             // Brennan/vendor part number
+  quantity: number | null;               // Quantity sold
+  transactionDate: Date | null;          // Ship/sale date
+  sellPrice: number | null;              // Price actually charged
+  // Cross-reference fields
+  endUserCode: string | null;            // Ship-to customer
+  endUserName: string | null;            // Ship-to name
+  orderNumber: string | null;            // Invoice/order number
+  // Context fields
+  distributorItemNumber: string | null;  // Distributor's internal part number
+  extendedAmount: number | null;         // Total line amount (qty × price)
+  shipToCity: string | null;             // Shipping location
+  shipToState: string | null;
+  // Raw data for traceability
+  rawData: Record<string, unknown>;
+  parseErrors: ParseError[];
+}
+
+export type PosFieldName =
+  | 'itemNumber'
+  | 'quantity'
+  | 'transactionDate'
+  | 'sellPrice'
+  | 'endUserCode'
+  | 'endUserName'
+  | 'orderNumber'
+  | 'distributorItemNumber'
+  | 'extendedAmount'
+  | 'shipToCity'
+  | 'shipToState';
+
+export const REQUIRED_POS_FIELDS: PosFieldName[] = [
+  'itemNumber',
+  'quantity',
+  'transactionDate',
+];
+
+export interface PosParseResult {
+  success: boolean;
+  rows: StandardPosRow[];
+  totalRows: number;
+  validRows: number;
+  errorRows: number;
+  warnings: string[];
+  errors: string[];
+}
+
+// ---------------------------------------------------------------------------
 // Exception codes — from RECONCILIATION_DESIGN.md Section 6
 // ---------------------------------------------------------------------------
 export const EXCEPTION_CODES = {
@@ -99,8 +155,9 @@ export const EXCEPTION_CODES = {
   CLM_007: 'CLM-007', // Contract Expired
   CLM_008: 'CLM-008', // End User Mismatch
   CLM_009: 'CLM-009', // Duplicate Claim Line
-  CLM_010: 'CLM-010', // No Sales Record (NetSuite)
-  CLM_011: 'CLM-011', // Quantity Mismatch (NetSuite)
+  CLM_010: 'CLM-010', // No Matching POS Transaction
+  CLM_011: 'CLM-011', // POS Quantity Mismatch
+  CLM_012: 'CLM-012', // POS Price Mismatch
 } as const;
 
 export type ExceptionCode = typeof EXCEPTION_CODES[keyof typeof EXCEPTION_CODES];
@@ -113,7 +170,9 @@ export const RUN_STATUSES = {
   STAGED: 'staged',
   RUNNING: 'running',
   REVIEW: 'review',
-  COMPLETED: 'completed',
+  REVIEWED: 'reviewed',   // All exceptions resolved, ready for commit
+  COMMITTED: 'committed', // Approved claims written to master data
+  COMPLETED: 'completed', // Legacy — treated same as reviewed
   CANCELLED: 'cancelled',
 } as const;
 

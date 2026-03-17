@@ -12,7 +12,9 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:seed": "npx tsx prisma/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "db:backup": "bash scripts/backup.sh",
+    "db:restore": "bash scripts/restore.sh"
   },
   "repository": {
     "type": "git",

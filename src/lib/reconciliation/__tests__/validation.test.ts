@@ -37,7 +37,7 @@ vi.mock('@/lib/db/client', () => ({
   prisma: mockPrisma,
 }));
 
-import { validateRun } from '../validation.service';
+import { validateRun, findEffectiveDateMatch } from '../validation.service';
 
 // ---------------------------------------------------------------------------
 // Helpers to build test data
@@ -52,6 +52,7 @@ function makeRun(overrides: Record<string, unknown> = {}) {
     distributor: { id: 10, code: 'MOTION', name: 'Motion Industries' },
     claimBatch: { id: 100 },
     status: 'staged',
+    posBatchId: null,
     ...overrides,
   };
 }
@@ -68,6 +69,7 @@ function makeClaimRow(overrides: Record<string, unknown> = {}) {
     quantity: new Decimal('150'),
     status: 'parsed',
     distributorOrderNumber: 'MO-12345',
+    planCode: null,
     ...overrides,
   };
 }
@@ -79,6 +81,7 @@ function makeContract(overrides: Record<string, unknown> = {}) {
     startDate: new Date('2025-01-01'),
     endDate: new Date('2027-12-31'),
     status: 'active',
+    rebatePlans: [{ id: 50, planCode: 'OSW' }],
     ...overrides,
   };
 }
@@ -100,7 +103,7 @@ function makeRebateRecord(overrides: Record<string, unknown> = {}) {
     startDate: new Date('2025-01-01'),
     endDate: null,
     status: 'active',
-    rebatePlan: { contractId: 1 },
+    rebatePlan: { contractId: 1, planCode: 'OSW' },
     ...overrides,
   };
 }
@@ -119,13 +122,13 @@ beforeEach(() => {
   mockPrisma.claimRow.findMany.mockResolvedValue([makeClaimRow()]);
   mockPrisma.claimRow.update.mockResolvedValue({});
 
-  // Default: contract exists
+  // Default: contract exists with one plan
   mockPrisma.contract.findMany.mockResolvedValue([makeContract()]);
 
   // Default: item exists
   mockPrisma.item.findMany.mockResolvedValue([makeItem()]);
 
-  // Default: rebate record exists with matching price
+  // Default: rebate record exists with matching price (covers transaction date)
   mockPrisma.rebateRecord.findMany.mockResolvedValue([makeRebateRecord()]);
 
   // Default: issue ops
@@ -134,7 +137,7 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests
+// Tests — validateRun
 // ---------------------------------------------------------------------------
 describe('validateRun', () => {
   it('returns success=false when run does not exist', async () => {
@@ -165,10 +168,10 @@ describe('validateRun', () => {
     expect(result.exceptionCount).toBe(0);
     expect(result.issues).toHaveLength(0);
 
-    // Run status should be set to completed (no exceptions)
+    // Run status should be set to reviewed (no exceptions)
     expect(mockPrisma.reconciliationRun.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ status: 'completed' }),
+        data: expect.objectContaining({ status: 'reviewed' }),
       })
     );
   });
@@ -195,7 +198,7 @@ describe('validateRun', () => {
 
     const result = await validateRun(1);
 
-    const issue = result.issues.find(i => i.code === EXCEPTION_CODES.CLM_007);
+    const issue = result.issues.find(i => i.code === EXCEPTION_CODES.CLM_007 && i.category === 'Contract Expired');
     expect(issue).toBeDefined();
     expect(issue!.severity).toBe('error');
     expect(issue!.suggestedAction).toBe('reject');
@@ -213,6 +216,20 @@ describe('validateRun', () => {
     expect(issue).toBeUndefined();
   });
 
+  it('detects CLM-007: Contract Not Yet Effective', async () => {
+    // Contract starts 2027, transaction in Feb 2026
+    mockPrisma.contract.findMany.mockResolvedValue([
+      makeContract({ startDate: new Date('2027-01-01'), endDate: new Date('2028-12-31') }),
+    ]);
+
+    const result = await validateRun(1);
+
+    const issue = result.issues.find(i => i.code === EXCEPTION_CODES.CLM_007 && i.category === 'Contract Not Yet Effective');
+    expect(issue).toBeDefined();
+    expect(issue!.severity).toBe('error');
+    expect(issue!.description).toContain('starts');
+  });
+
   it('detects CLM-006: Unknown Item', async () => {
     mockPrisma.claimRow.findMany.mockResolvedValue([
       makeClaimRow({ itemNumber: '9999-FAKE-ITEM' }),
@@ -224,6 +241,10 @@ describe('validateRun', () => {
     expect(issue).toBeDefined();
     expect(issue!.description).toContain('9999-FAKE-ITEM');
     expect(issue!.suggestedAction).toBe('create_item');
+    expect(issue!.suggestedData).toMatchObject({
+      itemNumber: '9999-FAKE-ITEM',
+      contractNumber: '100884',
+    });
   });
 
   it('detects CLM-003: Item Not in Contract', async () => {
@@ -235,6 +256,11 @@ describe('validateRun', () => {
     const issue = result.issues.find(i => i.code === EXCEPTION_CODES.CLM_003);
     expect(issue).toBeDefined();
     expect(issue!.description).toContain('not on any plan');
+    expect(issue!.masterRecordId).toBeNull();
+    expect(issue!.suggestedData).toMatchObject({
+      planId: 50,       // single plan on contract → suggested
+      itemId: 1,
+    });
   });
 
   it('detects CLM-001: Price Mismatch beyond tolerance', async () => {
@@ -250,6 +276,14 @@ describe('validateRun', () => {
     expect(issue!.description).toContain('$6.00');
     expect(issue!.description).toContain('$2.78');
     expect(issue!.suggestedAction).toBe('adjust');
+    // Verify issue metadata for commit service
+    expect(issue!.masterRecordId).toBe(1);
+    expect(issue!.suggestedData).toMatchObject({
+      oldPrice: 2.78,
+      newPrice: 6.00,
+      planId: 50,
+      itemId: 1,
+    });
   });
 
   it('does not flag CLM-001 when price is within $0.01 tolerance', async () => {
@@ -374,6 +408,24 @@ describe('validateRun', () => {
     expect(createCall.data.some((d: { code: string }) => d.code === EXCEPTION_CODES.CLM_006)).toBe(true);
   });
 
+  it('persists masterRecordId and suggestedData on CLM-001 issues', async () => {
+    mockPrisma.claimRow.findMany.mockResolvedValue([
+      makeClaimRow({ deviatedPrice: new Decimal('6.00') }),
+    ]);
+
+    await validateRun(1);
+
+    const createCall = mockPrisma.reconciliationIssue.createMany.mock.calls[0][0];
+    const clm001 = createCall.data.find((d: { code: string }) => d.code === EXCEPTION_CODES.CLM_001);
+    expect(clm001).toBeDefined();
+    expect(clm001.masterRecordId).toBe(1);
+    expect(clm001.suggestedData).toMatchObject({
+      oldPrice: 2.78,
+      newPrice: 6.00,
+      planId: 50,
+    });
+  });
+
   it('deletes existing issues before re-validating', async () => {
     await validateRun(1);
 
@@ -411,5 +463,278 @@ describe('validateRun', () => {
 
     expect(result.totalRows).toBe(3);
     expect(result.validatedCount).toBe(2); // only non-error rows
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — Effective-date matching
+// ---------------------------------------------------------------------------
+describe('findEffectiveDateMatch', () => {
+  const makeRecord = (overrides: Record<string, unknown> = {}) => ({
+    id: 1,
+    rebatePrice: new Decimal('2.78'),
+    rebatePlanId: 50,
+    planCode: 'OSW',
+    startDate: new Date('2025-01-01'),
+    endDate: null as Date | null,
+    ...overrides,
+  });
+
+  it('returns no_match for empty candidates', () => {
+    const result = findEffectiveDateMatch([], new Date('2026-02-15'), null);
+    expect(result.type).toBe('no_match');
+    if (result.type === 'no_match') {
+      expect(result.hasRecordsOutsideDateRange).toBe(false);
+    }
+  });
+
+  it('matches a record with open end date (null) when transaction is after start', () => {
+    const records = [makeRecord()];
+    const result = findEffectiveDateMatch(records, new Date('2026-02-15'), null);
+    expect(result.type).toBe('match');
+    if (result.type === 'match') {
+      expect(result.record.id).toBe(1);
+    }
+  });
+
+  it('matches a record when transaction date falls within [startDate, endDate]', () => {
+    const records = [makeRecord({ startDate: new Date('2026-01-01'), endDate: new Date('2026-12-31') })];
+    const result = findEffectiveDateMatch(records, new Date('2026-06-15'), null);
+    expect(result.type).toBe('match');
+  });
+
+  it('returns no_match when transaction date is before record start', () => {
+    const records = [makeRecord({ startDate: new Date('2027-01-01') })];
+    const result = findEffectiveDateMatch(records, new Date('2026-02-15'), null);
+    expect(result.type).toBe('no_match');
+    if (result.type === 'no_match') {
+      expect(result.hasRecordsOutsideDateRange).toBe(true);
+    }
+  });
+
+  it('returns no_match when transaction date is after record end', () => {
+    const records = [makeRecord({ startDate: new Date('2025-01-01'), endDate: new Date('2025-12-31') })];
+    const result = findEffectiveDateMatch(records, new Date('2026-02-15'), null);
+    expect(result.type).toBe('no_match');
+    if (result.type === 'no_match') {
+      expect(result.hasRecordsOutsideDateRange).toBe(true);
+    }
+  });
+
+  it('selects the correct record when multiple have different date ranges', () => {
+    const records = [
+      makeRecord({ id: 1, startDate: new Date('2025-01-01'), endDate: new Date('2025-12-31'), rebatePrice: new Decimal('2.00') }),
+      makeRecord({ id: 2, startDate: new Date('2026-01-01'), endDate: new Date('2026-12-31'), rebatePrice: new Decimal('3.00') }),
+    ];
+    const result = findEffectiveDateMatch(records, new Date('2026-06-15'), null);
+    expect(result.type).toBe('match');
+    if (result.type === 'match') {
+      expect(result.record.id).toBe(2);
+      expect(Number(result.record.rebatePrice)).toBe(3.00);
+    }
+  });
+
+  it('narrows by plan code when provided', () => {
+    const records = [
+      makeRecord({ id: 1, planCode: 'OSW', rebatePlanId: 50, rebatePrice: new Decimal('2.00') }),
+      makeRecord({ id: 2, planCode: 'BRG', rebatePlanId: 51, rebatePrice: new Decimal('3.00') }),
+    ];
+    const result = findEffectiveDateMatch(records, new Date('2026-02-15'), 'BRG');
+    expect(result.type).toBe('match');
+    if (result.type === 'match') {
+      expect(result.record.id).toBe(2);
+    }
+  });
+
+  it('returns ambiguous when multiple records match with different prices', () => {
+    const records = [
+      makeRecord({ id: 1, planCode: 'OSW', rebatePlanId: 50, rebatePrice: new Decimal('2.00') }),
+      makeRecord({ id: 2, planCode: 'BRG', rebatePlanId: 51, rebatePrice: new Decimal('3.00') }),
+    ];
+    const result = findEffectiveDateMatch(records, new Date('2026-02-15'), null);
+    expect(result.type).toBe('ambiguous');
+    if (result.type === 'ambiguous') {
+      expect(result.candidates).toHaveLength(2);
+    }
+  });
+
+  it('returns match (not ambiguous) when multiple records have same plan and price', () => {
+    // e.g., overlapping date ranges but same plan and price — pick latest start
+    const records = [
+      makeRecord({ id: 1, startDate: new Date('2025-01-01'), rebatePrice: new Decimal('2.78') }),
+      makeRecord({ id: 2, startDate: new Date('2025-06-01'), rebatePrice: new Decimal('2.78') }),
+    ];
+    const result = findEffectiveDateMatch(records, new Date('2026-02-15'), null);
+    expect(result.type).toBe('match');
+    if (result.type === 'match') {
+      expect(result.record.id).toBe(2); // latest startDate
+    }
+  });
+
+  it('matches on exact start date boundary (transaction = startDate)', () => {
+    const records = [makeRecord({ startDate: new Date('2026-02-15') })];
+    const result = findEffectiveDateMatch(records, new Date('2026-02-15'), null);
+    expect(result.type).toBe('match');
+  });
+
+  it('matches on exact end date boundary (transaction = endDate)', () => {
+    const records = [makeRecord({ startDate: new Date('2025-01-01'), endDate: new Date('2026-02-15') })];
+    const result = findEffectiveDateMatch(records, new Date('2026-02-15'), null);
+    expect(result.type).toBe('match');
+  });
+
+  it('uses all candidates when transaction date is null', () => {
+    const records = [makeRecord()];
+    const result = findEffectiveDateMatch(records, null, null);
+    expect(result.type).toBe('match');
+  });
+
+  it('ignores non-matching plan code and falls through to all date-matched', () => {
+    // Only one record, claim has wrong plan code — still matches (plan code didn't narrow)
+    const records = [makeRecord({ planCode: 'OSW' })];
+    const result = findEffectiveDateMatch(records, new Date('2026-02-15'), 'NONEXISTENT');
+    expect(result.type).toBe('match');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — Effective-date matching in validateRun (integration)
+// ---------------------------------------------------------------------------
+describe('validateRun effective-date matching', () => {
+  it('raises CLM-003 when record exists but does not cover transaction date', async () => {
+    // Record ended in 2025, transaction in Feb 2026
+    mockPrisma.rebateRecord.findMany.mockResolvedValue([
+      makeRebateRecord({
+        startDate: new Date('2025-01-01'),
+        endDate: new Date('2025-12-31'),
+      }),
+    ]);
+
+    const result = await validateRun(1);
+
+    const issue = result.issues.find(i => i.code === EXCEPTION_CODES.CLM_003);
+    expect(issue).toBeDefined();
+    expect(issue!.description).toContain('no record covers transaction date');
+  });
+
+  it('does NOT match a future record for a current transaction', async () => {
+    // Record starts in 2027, transaction in Feb 2026
+    mockPrisma.rebateRecord.findMany.mockResolvedValue([
+      makeRebateRecord({
+        startDate: new Date('2027-01-01'),
+        endDate: null,
+      }),
+    ]);
+
+    const result = await validateRun(1);
+
+    const issue = result.issues.find(i => i.code === EXCEPTION_CODES.CLM_003);
+    expect(issue).toBeDefined();
+    expect(result.matchedCount).toBe(0);
+  });
+
+  it('matches the correct record among multiple with different date ranges', async () => {
+    mockPrisma.rebateRecord.findMany.mockResolvedValue([
+      makeRebateRecord({
+        id: 10,
+        startDate: new Date('2025-01-01'),
+        endDate: new Date('2025-12-31'),
+        rebatePrice: new Decimal('2.00'),
+      }),
+      makeRebateRecord({
+        id: 20,
+        startDate: new Date('2026-01-01'),
+        endDate: null,
+        rebatePrice: new Decimal('2.78'), // matches claimed price
+      }),
+    ]);
+
+    const result = await validateRun(1);
+
+    // Should match record 20, no price mismatch
+    expect(result.matchedCount).toBe(1);
+    expect(result.exceptionCount).toBe(0);
+
+    // Verify the correct record ID was set
+    expect(mockPrisma.claimRow.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ matchedRecordId: 20 }),
+      })
+    );
+  });
+
+  it('raises CLM-005 when multiple records match with different prices', async () => {
+    mockPrisma.contract.findMany.mockResolvedValue([
+      makeContract({
+        rebatePlans: [
+          { id: 50, planCode: 'OSW' },
+          { id: 51, planCode: 'BRG' },
+        ],
+      }),
+    ]);
+
+    mockPrisma.rebateRecord.findMany.mockResolvedValue([
+      makeRebateRecord({
+        id: 10, rebatePlanId: 50,
+        rebatePlan: { contractId: 1, planCode: 'OSW' },
+        rebatePrice: new Decimal('2.00'),
+      }),
+      makeRebateRecord({
+        id: 20, rebatePlanId: 51,
+        rebatePlan: { contractId: 1, planCode: 'BRG' },
+        rebatePrice: new Decimal('3.00'),
+      }),
+    ]);
+
+    const result = await validateRun(1);
+
+    const issue = result.issues.find(i => i.code === EXCEPTION_CODES.CLM_005);
+    expect(issue).toBeDefined();
+    expect(issue!.severity).toBe('warning');
+    expect(issue!.suggestedData).toHaveProperty('candidateRecordIds');
+  });
+
+  it('disambiguates by plan code when claim provides one', async () => {
+    mockPrisma.contract.findMany.mockResolvedValue([
+      makeContract({
+        rebatePlans: [
+          { id: 50, planCode: 'OSW' },
+          { id: 51, planCode: 'BRG' },
+        ],
+      }),
+    ]);
+
+    mockPrisma.rebateRecord.findMany.mockResolvedValue([
+      makeRebateRecord({
+        id: 10, rebatePlanId: 50,
+        rebatePlan: { contractId: 1, planCode: 'OSW' },
+        rebatePrice: new Decimal('2.78'),
+      }),
+      makeRebateRecord({
+        id: 20, rebatePlanId: 51,
+        rebatePlan: { contractId: 1, planCode: 'BRG' },
+        rebatePrice: new Decimal('3.00'),
+      }),
+    ]);
+
+    // Claim provides planCode 'BRG'
+    mockPrisma.claimRow.findMany.mockResolvedValue([
+      makeClaimRow({ deviatedPrice: new Decimal('3.00'), planCode: 'BRG' }),
+    ]);
+
+    const result = await validateRun(1);
+
+    // Should match record 20 (BRG plan) with no issues
+    expect(result.matchedCount).toBe(1);
+    const clm005 = result.issues.find(i => i.code === EXCEPTION_CODES.CLM_005);
+    expect(clm005).toBeUndefined();
+    const clm001 = result.issues.find(i => i.code === EXCEPTION_CODES.CLM_001);
+    expect(clm001).toBeUndefined();
+
+    expect(mockPrisma.claimRow.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ matchedRecordId: 20 }),
+      })
+    );
   });
 });

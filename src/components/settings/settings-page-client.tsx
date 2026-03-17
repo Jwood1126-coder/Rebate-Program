@@ -3,7 +3,26 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import ColumnMappingConfig from "@/components/settings/column-mapping-config";
 import type { UserRole } from "@/lib/constants/statuses";
+
+interface DistributorInfo {
+  id: number;
+  code: string;
+  name: string;
+}
+
+interface MappingInfo {
+  id: number;
+  distributorId: number;
+  fileType: string;
+  name: string;
+  mappings: Record<string, string>;
+  dateFormat: string;
+  sampleHeaders: string[] | null;
+  isActive: boolean;
+  distributor: { id: number; code: string; name: string };
+}
 
 interface SettingsPageClientProps {
   role: UserRole;
@@ -15,17 +34,20 @@ interface SettingsPageClientProps {
     endUsers: number;
     users: number;
   };
+  distributors?: DistributorInfo[];
+  existingMappings?: MappingInfo[];
 }
 
 type EntityTab = "distributors" | "contracts" | "plans" | "items" | "endUsers";
-type MainTab = "entities" | "users" | "system";
+type MainTab = "entities" | "mappings" | "users" | "system";
 
-export function SettingsPageClient({ role, counts }: SettingsPageClientProps) {
+export function SettingsPageClient({ role, counts, distributors = [], existingMappings = [] }: SettingsPageClientProps) {
   const [mainTab, setMainTab] = useState<MainTab>("entities");
   const isAdmin = role === "admin";
 
   const mainTabs: { key: MainTab; label: string; adminOnly?: boolean }[] = [
     { key: "entities", label: "Entities" },
+    { key: "mappings", label: "Column Mappings" },
     { key: "users", label: "Users", adminOnly: true },
     { key: "system", label: "System" },
   ];
@@ -57,6 +79,7 @@ export function SettingsPageClient({ role, counts }: SettingsPageClientProps) {
       </div>
 
       {mainTab === "entities" && <EntitiesTab counts={counts} />}
+      {mainTab === "mappings" && <MappingsTab distributors={distributors} existingMappings={existingMappings} />}
       {mainTab === "users" && isAdmin && <UsersTab />}
       {mainTab === "system" && <SystemTab counts={counts} />}
     </div>
@@ -394,9 +417,54 @@ function UsersTab() {
 }
 
 // ============================================================================
+// Mappings Tab
+// ============================================================================
+function MappingsTab({ distributors, existingMappings }: { distributors: DistributorInfo[]; existingMappings: MappingInfo[] }) {
+  return <ColumnMappingConfig distributors={distributors} existingMappings={existingMappings} />;
+}
+
+// ============================================================================
 // System Tab
 // ============================================================================
 function SystemTab({ counts }: { counts: SettingsPageClientProps["counts"] }) {
+  const [exportingFull, setExportingFull] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
+
+  const handleExport = async (type: "full" | "csv") => {
+    const setLoading = type === "full" ? setExportingFull : setExportingCsv;
+    setLoading(true);
+    setExportError(null);
+    setExportSuccess(null);
+
+    try {
+      const url = type === "full" ? "/api/export/full" : "/api/export/records-csv";
+      const res = await fetch(url);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Export failed" }));
+        throw new Error(data.error || `Export failed (${res.status})`);
+      }
+
+      // Trigger download
+      const blob = await res.blob();
+      const filename = res.headers.get("Content-Disposition")?.match(/filename="(.+)"/)?.[1]
+        || (type === "full" ? "rms-export.xlsx" : "rebate-records.csv");
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      setExportSuccess(type === "full" ? "Full Excel export downloaded" : "Records CSV downloaded");
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "Export failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-brennan-border bg-white p-5 shadow-sm">
@@ -430,6 +498,138 @@ function SystemTab({ counts }: { counts: SettingsPageClientProps["counts"] }) {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Data Export & Backup */}
+      <div className="rounded-lg border border-brennan-border bg-white p-5 shadow-sm">
+        <h3 className="text-sm font-bold text-brennan-text">Data Export &amp; Backup</h3>
+        <p className="mt-1 text-xs text-gray-500">
+          Download your data at any time. These exports contain everything needed to continue operations
+          manually or restore from a backup.
+        </p>
+
+        {exportError && (
+          <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+            {exportError}
+          </div>
+        )}
+        {exportSuccess && (
+          <div className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-xs text-green-700">
+            {exportSuccess}
+          </div>
+        )}
+
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {/* Full Excel Export */}
+          <div className="rounded-lg border border-gray-200 p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-green-100">
+                <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 0 1-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0 1 12 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-brennan-text">Full Excel Export</p>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  All tables: distributors, contracts, plans, items, records. Multi-sheet workbook
+                  you can open in Excel and use as a manual fallback.
+                </p>
+                <button
+                  onClick={() => handleExport("full")}
+                  disabled={exportingFull}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                >
+                  {exportingFull ? (
+                    <>
+                      <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/><path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor" className="opacity-75"/></svg>
+                      Exporting...
+                    </>
+                  ) : (
+                    <>Download .xlsx</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Records CSV Export */}
+          <div className="rounded-lg border border-gray-200 p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100">
+                <svg className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-brennan-text">Records CSV</p>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Just the rebate records as a flat CSV. Opens in any spreadsheet. Use this as your
+                  emergency manual fallback if the system is unavailable.
+                </p>
+                <button
+                  onClick={() => handleExport("csv")}
+                  disabled={exportingCsv}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-brennan-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-brennan-dark disabled:opacity-50"
+                >
+                  {exportingCsv ? (
+                    <>
+                      <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/><path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor" className="opacity-75"/></svg>
+                      Exporting...
+                    </>
+                  ) : (
+                    <>Download .csv</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2.5">
+          <p className="text-xs font-medium text-amber-800">Backup Recommendation</p>
+          <p className="mt-0.5 text-xs text-amber-700">
+            Download a full Excel export regularly (weekly or before major imports). The export
+            contains all data needed to rebuild the system or continue operations in spreadsheets
+            if necessary. For database-level backups, use the server command: <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-[10px]">npm run db:backup</code>
+          </p>
+        </div>
+      </div>
+
+      {/* Disaster Recovery Quick Reference */}
+      <div className="rounded-lg border border-brennan-border bg-white p-5 shadow-sm">
+        <h3 className="text-sm font-bold text-brennan-text">Disaster Recovery</h3>
+        <p className="mt-1 text-xs text-gray-500">
+          If the system goes down, here is how to access your data and continue operations.
+        </p>
+        <div className="mt-3 space-y-2">
+          <DrStep number={1} title="Use Your Last Excel Export">
+            Open the most recent .xlsx file. It has every distributor, contract, plan, item, and
+            rebate record. You can continue operating from this spreadsheet while the system is restored.
+          </DrStep>
+          <DrStep number={2} title="Restore from Database Backup">
+            If the database is corrupted, restore from the latest pg_dump backup:
+            <code className="mt-1 block rounded bg-gray-100 px-2 py-1 font-mono text-[10px]">npm run db:restore backups/rms-backup-YYYY-MM-DD.sql</code>
+          </DrStep>
+          <DrStep number={3} title="Re-seed from Scratch">
+            If starting completely fresh, the seed script rebuilds reference data:
+            <code className="mt-1 block rounded bg-gray-100 px-2 py-1 font-mono text-[10px]">npm run db:push &amp;&amp; npm run db:seed</code>
+            Then re-import records from your Excel backup using the contract upload tool.
+          </DrStep>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DrStep({ number, title, children }: { number: number; title: string; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-3 rounded-lg bg-gray-50 px-3 py-2.5">
+      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brennan-blue text-xs font-bold text-white">
+        {number}
+      </div>
+      <div>
+        <p className="text-xs font-semibold text-brennan-text">{title}</p>
+        <p className="mt-0.5 text-xs text-gray-600">{children}</p>
       </div>
     </div>
   );

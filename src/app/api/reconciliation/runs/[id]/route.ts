@@ -1,12 +1,16 @@
 // GET /api/reconciliation/runs/:id — Get a single reconciliation run with details.
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getSessionUser } from '@/lib/auth/session';
 import { getReconciliationRun, getClaimRows } from '@/lib/reconciliation/staging.service';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const sessionResult = await getSessionUser();
+  if ('error' in sessionResult) return sessionResult.error;
+
   const { id } = await params;
   const runId = parseInt(id);
   if (isNaN(runId)) {

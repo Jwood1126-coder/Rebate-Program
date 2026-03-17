@@ -9,16 +9,31 @@ export default async function SettingsPage() {
   const session = await auth();
   const role = (session?.user as unknown as { role: UserRole })?.role;
 
-  // Fetch entity counts for the overview
-  const [distributorCount, contractCount, planCount, itemCount, endUserCount, userCount] =
-    await Promise.all([
-      prisma.distributor.count(),
-      prisma.contract.count(),
-      prisma.rebatePlan.count(),
-      prisma.item.count(),
-      prisma.endUser.count(),
-      prisma.user.count(),
-    ]);
+  // Fetch entity counts, distributors, and existing column mappings
+  const [
+    distributorCount, contractCount, planCount, itemCount, endUserCount, userCount,
+    distributors,
+    existingMappings,
+  ] = await Promise.all([
+    prisma.distributor.count(),
+    prisma.contract.count(),
+    prisma.rebatePlan.count(),
+    prisma.item.count(),
+    prisma.endUser.count(),
+    prisma.user.count(),
+    prisma.distributor.findMany({
+      where: { isActive: true },
+      orderBy: { code: "asc" },
+      select: { id: true, code: true, name: true },
+    }),
+    prisma.distributorColumnMapping.findMany({
+      where: { isActive: true },
+      include: {
+        distributor: { select: { id: true, code: true, name: true } },
+      },
+      orderBy: [{ distributor: { code: "asc" } }, { fileType: "asc" }],
+    }),
+  ]);
 
   return (
     <SettingsPageClient
@@ -31,6 +46,8 @@ export default async function SettingsPage() {
         endUsers: endUserCount,
         users: userCount,
       }}
+      distributors={distributors}
+      existingMappings={JSON.parse(JSON.stringify(existingMappings))}
     />
   );
 }

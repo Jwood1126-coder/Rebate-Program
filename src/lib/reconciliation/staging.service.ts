@@ -4,7 +4,7 @@
 
 import { prisma } from '@/lib/db/client';
 import { parseClaimFile } from './parsing.service';
-import { getColumnMapping } from './column-mappings';
+import { getColumnMappingAsync } from './column-mappings.server';
 import type { ClaimParseResult, StandardClaimRow } from './types';
 import { CLAIM_BATCH_STATUSES, RUN_STATUSES } from './types';
 import { Decimal } from '@prisma/client/runtime/library';
@@ -43,8 +43,8 @@ export async function stageClaimFile(input: StageClaimFileInput): Promise<StageC
     userId,
   } = input;
 
-  // Get column mapping for this distributor
-  const mapping = getColumnMapping(distributorCode);
+  // Get column mapping for this distributor (DB first, then hardcoded fallback)
+  const mapping = await getColumnMappingAsync(distributorCode);
   if (!mapping) {
     return {
       success: false,
@@ -157,8 +157,10 @@ export async function listReconciliationRuns(filters?: {
       ...(filters?.status && { status: filters.status }),
     },
     include: {
-      distributor: true,
-      runBy: { select: { id: true, displayName: true } },
+      distributor: { select: { code: true, name: true } },
+      runBy: { select: { displayName: true } },
+      claimBatch: { select: { fileName: true, totalRows: true, validRows: true, errorRows: true } },
+      posBatch: { select: { id: true, fileName: true, totalRows: true, validRows: true, errorRows: true } },
       _count: { select: { issues: true } },
     },
     orderBy: { startedAt: 'desc' },

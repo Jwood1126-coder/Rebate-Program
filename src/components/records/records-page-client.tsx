@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback, Suspense } from "react";
+import { useState, useCallback, Suspense, useTransition } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { RecordModal } from "./record-modal";
 import { StatusBadge } from "./status-badge";
@@ -28,71 +28,34 @@ export interface RecordRow {
   rawEndDate: string | null;
 }
 
+export interface FilterOptions {
+  distributors: string[];
+  contracts: string[];
+  plans: string[];
+  endUsers: string[];
+  statuses: string[];
+}
+
 interface RecordsPageClientProps {
   records: RecordRow[];
   totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  filterOptions: FilterOptions;
 }
 
-// Helper: filter records by all filters except the excluded key
-function filterExcluding(
-  records: RecordRow[],
-  filters: Record<string, string>,
-  excludeKey: string,
-  searchText: string
-): RecordRow[] {
-  return records.filter((r) => {
-    for (const [key, val] of Object.entries(filters)) {
-      if (key === excludeKey || !val) continue;
-      switch (key) {
-        case "distributor":
-          if (r.distributor !== val) return false;
-          break;
-        case "contract":
-          if (r.contractNumber !== val) return false;
-          break;
-        case "plan":
-          if (r.planCode !== val) return false;
-          break;
-        case "endUser":
-          if (r.endUser !== val) return false;
-          break;
-        case "status":
-          if (r.status !== val) return false;
-          break;
-        case "dateFrom":
-          if (r.rawStartDate < val) return false;
-          break;
-        case "dateTo": {
-          const endDate = r.rawEndDate ?? "9999-12-31";
-          if (endDate > val) return false;
-          break;
-        }
-      }
-    }
-    if (searchText) {
-      const q = searchText.toLowerCase();
-      if (
-        !r.distributor.toLowerCase().includes(q) &&
-        !r.itemNumber.toLowerCase().includes(q) &&
-        !r.contractNumber.toLowerCase().includes(q) &&
-        !r.planCode.toLowerCase().includes(q) &&
-        !r.endUser.toLowerCase().includes(q) &&
-        !r.rebatePrice.toLowerCase().includes(q)
-      ) {
-        return false;
-      }
-    }
-    return true;
-  });
-}
-
-function unique(arr: string[]): string[] {
-  return [...new Set(arr)].sort();
-}
-
-function RecordsPageInner({ records, totalCount }: RecordsPageClientProps) {
+function RecordsPageInner({
+  records,
+  totalCount,
+  page,
+  pageSize,
+  totalPages,
+  filterOptions,
+}: RecordsPageClientProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editRecord, setEditRecord] = useState<{
@@ -110,83 +73,64 @@ function RecordsPageInner({ records, totalCount }: RecordsPageClientProps) {
     id: number;
   } | null>(null);
 
-  // Filter state
-  const [filterDistributor, setFilterDistributor] = useState(searchParams.get("distributor") || "");
-  const [filterStatus, setFilterStatus] = useState(searchParams.get("status") || "");
-  const [filterContract, setFilterContract] = useState("");
-  const [filterPlan, setFilterPlan] = useState("");
-  const [filterEndUser, setFilterEndUser] = useState("");
-  const [filterDateFrom, setFilterDateFrom] = useState("");
-  const [filterDateTo, setFilterDateTo] = useState("");
-  const [searchText, setSearchText] = useState("");
+  // Read current filter values from URL params
+  const filterDistributor = searchParams.get("distributor") || "";
+  const filterContract = searchParams.get("contract") || "";
+  const filterPlan = searchParams.get("plan") || "";
+  const filterEndUser = searchParams.get("endUser") || "";
+  const filterStatus = searchParams.get("status") || "";
+  const filterDateFrom = searchParams.get("dateFrom") || "";
+  const filterDateTo = searchParams.get("dateTo") || "";
+  const searchText = searchParams.get("search") || "";
 
-  // Aggregate filter object for cascading computation
-  const filters = useMemo(
-    () => ({
-      distributor: filterDistributor,
-      contract: filterContract,
-      plan: filterPlan,
-      endUser: filterEndUser,
-      status: filterStatus,
-      dateFrom: filterDateFrom,
-      dateTo: filterDateTo,
-    }),
-    [filterDistributor, filterContract, filterPlan, filterEndUser, filterStatus, filterDateFrom, filterDateTo]
-  );
+  const hasFilters =
+    filterDistributor ||
+    filterContract ||
+    filterPlan ||
+    filterEndUser ||
+    filterStatus ||
+    filterDateFrom ||
+    filterDateTo ||
+    searchText;
 
-  const hasFilters = filterDistributor || filterStatus || filterContract || filterPlan || filterEndUser || filterDateFrom || filterDateTo || searchText;
-
-  // Cascading: available options for each dropdown = unique values from records filtered by everything EXCEPT that dropdown
-  const availableDistributors = useMemo(
-    () => unique(filterExcluding(records, filters, "distributor", searchText).map((r) => r.distributor)),
-    [records, filters, searchText]
-  );
-  const availableContracts = useMemo(
-    () => unique(filterExcluding(records, filters, "contract", searchText).map((r) => r.contractNumber)),
-    [records, filters, searchText]
-  );
-  const availablePlans = useMemo(
-    () => unique(filterExcluding(records, filters, "plan", searchText).map((r) => r.planCode)),
-    [records, filters, searchText]
-  );
-  const availableEndUsers = useMemo(
-    () => unique(filterExcluding(records, filters, "endUser", searchText).map((r) => r.endUser)),
-    [records, filters, searchText]
-  );
-  const availableStatuses = useMemo(
-    () => unique(filterExcluding(records, filters, "status", searchText).map((r) => r.status)),
-    [records, filters, searchText]
+  /**
+   * Update URL search params — triggers server re-render with new WHERE clause.
+   * Resets to page 1 when filters change.
+   */
+  const updateParams = useCallback(
+    (updates: Record<string, string>, resetPage = true) => {
+      const params = new URLSearchParams(searchParams.toString());
+      for (const [key, value] of Object.entries(updates)) {
+        if (value) {
+          params.set(key, value);
+        } else {
+          params.delete(key);
+        }
+      }
+      if (resetPage) {
+        params.delete("page");
+      }
+      startTransition(() => {
+        router.replace(`/records?${params.toString()}`, { scroll: false });
+      });
+    },
+    [searchParams, router]
   );
 
-  // Auto-clear stale selections synchronously during render
-  if (filterContract && !availableContracts.includes(filterContract)) {
-    setFilterContract("");
-  }
-  if (filterPlan && !availablePlans.includes(filterPlan)) {
-    setFilterPlan("");
-  }
-  if (filterEndUser && !availableEndUsers.includes(filterEndUser)) {
-    setFilterEndUser("");
-  }
-  if (filterStatus && !availableStatuses.includes(filterStatus)) {
-    setFilterStatus("");
-  }
+  const setFilter = useCallback(
+    (key: string, value: string) => updateParams({ [key]: value }),
+    [updateParams]
+  );
 
-  // Final filtered records (all filters applied)
-  const filteredRecords = useMemo(() => {
-    return filterExcluding(records, filters, "", searchText);
-  }, [records, filters, searchText]);
+  const setPage = useCallback(
+    (p: number) => updateParams({ page: p > 1 ? String(p) : "" }, false),
+    [updateParams]
+  );
 
   const clearFilters = useCallback(() => {
-    setFilterDistributor("");
-    setFilterStatus("");
-    setFilterContract("");
-    setFilterPlan("");
-    setFilterEndUser("");
-    setFilterDateFrom("");
-    setFilterDateTo("");
-    setSearchText("");
-    router.replace("/records", { scroll: false });
+    startTransition(() => {
+      router.replace("/records", { scroll: false });
+    });
   }, [router]);
 
   function handleEdit(record: RecordRow) {
@@ -207,14 +151,18 @@ function RecordsPageInner({ records, totalCount }: RecordsPageClientProps) {
   }
 
   // Convert to SearchableSelect options
-  const distributorOptions = availableDistributors.map((d) => ({ value: d, label: d }));
-  const contractOptions = availableContracts.map((c) => ({ value: c, label: c }));
-  const planOptions = availablePlans.map((p) => ({ value: p, label: p }));
-  const endUserOptions = availableEndUsers.map((u) => ({ value: u, label: u }));
-  const statusOptions = availableStatuses.map((s) => ({
+  const distributorOptions = filterOptions.distributors.map((d) => ({ value: d, label: d }));
+  const contractOptions = filterOptions.contracts.map((c) => ({ value: c, label: c }));
+  const planOptions = filterOptions.plans.map((p) => ({ value: p, label: p }));
+  const endUserOptions = filterOptions.endUsers.map((u) => ({ value: u, label: u }));
+  const statusOptions = filterOptions.statuses.map((s) => ({
     value: s,
     label: s.charAt(0).toUpperCase() + s.slice(1),
   }));
+
+  // Pagination info
+  const rangeStart = totalCount === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, totalCount);
 
   return (
     <>
@@ -223,9 +171,14 @@ function RecordsPageInner({ records, totalCount }: RecordsPageClientProps) {
         <div>
           <h1 className="text-xl font-bold text-brennan-text">Rebate Records</h1>
           <p className="mt-0.5 text-sm text-gray-500">
-            {hasFilters
-              ? `${filteredRecords.length} of ${totalCount} records`
-              : `${totalCount} records`}
+            {totalCount === 0
+              ? "No records"
+              : hasFilters
+                ? `${totalCount} matching records`
+                : `${totalCount} total records`}
+            {isPending && (
+              <span className="ml-2 text-brennan-blue">Loading...</span>
+            )}
           </p>
         </div>
         <button
@@ -242,35 +195,35 @@ function RecordsPageInner({ records, totalCount }: RecordsPageClientProps) {
           <SearchableSelect
             options={distributorOptions}
             value={filterDistributor}
-            onChange={setFilterDistributor}
+            onChange={(v) => setFilter("distributor", v)}
             placeholder="All Distributors"
             className="w-36"
           />
           <SearchableSelect
             options={contractOptions}
             value={filterContract}
-            onChange={setFilterContract}
+            onChange={(v) => setFilter("contract", v)}
             placeholder="All Contracts"
             className="w-36"
           />
           <SearchableSelect
             options={planOptions}
             value={filterPlan}
-            onChange={setFilterPlan}
+            onChange={(v) => setFilter("plan", v)}
             placeholder="All Plans"
             className="w-32"
           />
           <SearchableSelect
             options={endUserOptions}
             value={filterEndUser}
-            onChange={setFilterEndUser}
+            onChange={(v) => setFilter("endUser", v)}
             placeholder="All End Users"
             className="w-40"
           />
           <SearchableSelect
             options={statusOptions}
             value={filterStatus}
-            onChange={setFilterStatus}
+            onChange={(v) => setFilter("status", v)}
             placeholder="All Statuses"
             className="w-32"
           />
@@ -282,7 +235,7 @@ function RecordsPageInner({ records, totalCount }: RecordsPageClientProps) {
             <input
               type="date"
               value={filterDateFrom}
-              onChange={(e) => setFilterDateFrom(e.target.value)}
+              onChange={(e) => setFilter("dateFrom", e.target.value)}
               className="h-8 rounded border border-brennan-border bg-white px-2 text-xs text-brennan-text focus:border-brennan-blue focus:outline-none"
             />
           </div>
@@ -291,19 +244,16 @@ function RecordsPageInner({ records, totalCount }: RecordsPageClientProps) {
             <input
               type="date"
               value={filterDateTo}
-              onChange={(e) => setFilterDateTo(e.target.value)}
+              onChange={(e) => setFilter("dateTo", e.target.value)}
               className="h-8 rounded border border-brennan-border bg-white px-2 text-xs text-brennan-text focus:border-brennan-blue focus:outline-none"
             />
           </div>
 
           <div className="mx-1 h-5 w-px bg-brennan-border" />
 
-          <input
-            type="text"
+          <SearchInput
             value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            placeholder="Search..."
-            className="h-8 min-w-[160px] flex-1 rounded border border-brennan-border px-2 text-xs focus:border-brennan-blue focus:outline-none"
+            onChange={(v) => setFilter("search", v)}
           />
           {hasFilters && (
             <button
@@ -334,7 +284,7 @@ function RecordsPageInner({ records, totalCount }: RecordsPageClientProps) {
             </tr>
           </thead>
           <tbody className="divide-y divide-brennan-border">
-            {filteredRecords.map((r) => (
+            {records.map((r) => (
               <tr key={r.id} className="transition-colors hover:bg-brennan-light/40">
                 <td className="px-3 py-2">
                   <button
@@ -395,7 +345,7 @@ function RecordsPageInner({ records, totalCount }: RecordsPageClientProps) {
                 </td>
               </tr>
             ))}
-            {filteredRecords.length === 0 && (
+            {records.length === 0 && (
               <tr>
                 <td colSpan={10} className="px-4 py-12 text-center text-sm text-gray-400">
                   {hasFilters
@@ -406,6 +356,48 @@ function RecordsPageInner({ records, totalCount }: RecordsPageClientProps) {
             )}
           </tbody>
         </table>
+
+        {/* Pagination */}
+        {totalCount > 0 && (
+          <div className="flex items-center justify-between border-t border-brennan-border bg-gray-50 px-4 py-2.5">
+            <p className="text-xs text-gray-500">
+              Showing {rangeStart}–{rangeEnd} of {totalCount.toLocaleString()} records
+            </p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage(1)}
+                disabled={page <= 1}
+                className="rounded border border-brennan-border bg-white px-2 py-1 text-xs text-gray-600 hover:bg-brennan-light disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                First
+              </button>
+              <button
+                onClick={() => setPage(page - 1)}
+                disabled={page <= 1}
+                className="rounded border border-brennan-border bg-white px-2 py-1 text-xs text-gray-600 hover:bg-brennan-light disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Prev
+              </button>
+              <span className="px-2 text-xs text-gray-600">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                onClick={() => setPage(page + 1)}
+                disabled={page >= totalPages}
+                className="rounded border border-brennan-border bg-white px-2 py-1 text-xs text-gray-600 hover:bg-brennan-light disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+              <button
+                onClick={() => setPage(totalPages)}
+                disabled={page >= totalPages}
+                className="rounded border border-brennan-border bg-white px-2 py-1 text-xs text-gray-600 hover:bg-brennan-light disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Last
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <RecordModal
@@ -454,6 +446,37 @@ function RecordsPageInner({ records, totalCount }: RecordsPageClientProps) {
   );
 }
 
+/**
+ * Debounced search input — waits 400ms after typing stops before updating URL params.
+ * Prevents a server round-trip on every keystroke.
+ */
+function SearchInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [local, setLocal] = useState(value);
+  const timerRef = useState<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleChange(v: string) {
+    setLocal(v);
+    if (timerRef[0]) clearTimeout(timerRef[0]);
+    timerRef[0] = setTimeout(() => onChange(v), 400);
+  }
+
+  return (
+    <input
+      type="text"
+      value={local}
+      onChange={(e) => handleChange(e.target.value)}
+      placeholder="Search..."
+      className="h-8 min-w-[160px] flex-1 rounded border border-brennan-border px-2 text-xs focus:border-brennan-blue focus:outline-none"
+    />
+  );
+}
+
 // Generic entity edit modal — fetches entity data and provides edit form
 function EntityEditModal({
   type,
@@ -473,7 +496,8 @@ function EntityEditModal({
 
   const apiPath = type === "endUser" ? "end-users" : type === "plan" ? "plans" : `${type}s`;
 
-  useEffect(() => {
+  // Fetch entity on mount
+  useState(() => {
     fetch(`/api/${apiPath}/${id}`)
       .then((res) => (res.ok ? res.json() : Promise.reject("Not found")))
       .then((d) => {
@@ -485,7 +509,7 @@ function EntityEditModal({
         setError("Failed to load");
         setLoading(false);
       });
-  }, [apiPath, id]);
+  });
 
   async function handleSave() {
     setSaving(true);

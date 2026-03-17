@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { getConfiguredDistributors } from "@/lib/reconciliation/column-mappings";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 
 interface Distributor {
   id: number;
@@ -25,6 +24,7 @@ interface ReconciliationRun {
   distributor: { code: string; name: string };
   runBy: { displayName: string };
   claimBatch: { fileName: string; totalRows: number; validRows: number; errorRows: number } | null;
+  posBatch: { id: number; fileName: string; totalRows: number; validRows: number; errorRows: number } | null;
   _count: { issues: number };
 }
 
@@ -55,14 +55,68 @@ interface ValidationResult {
   issues: ValidationIssue[];
 }
 
-const configuredDistributors = getConfiguredDistributors();
+// Issue from the database (with id and resolution fields)
+interface DbIssue {
+  id: number;
+  reconciliationRunId: number;
+  code: string;
+  severity: string;
+  category: string;
+  description: string;
+  claimRowId: number | null;
+  suggestedAction: string;
+  resolution: string | null;
+  resolutionNote: string | null;
+  resolvedById: number | null;
+  resolvedAt: string | null;
+  resolvedBy: { displayName: string } | null;
+}
+
+interface RunProgress {
+  totalIssues: number;
+  resolvedCount: number;
+  pendingCount: number;
+  allResolved: boolean;
+  breakdown: Record<string, number>;
+}
+
+interface QueueItem {
+  distributorId: number;
+  distributorCode: string;
+  distributorName: string;
+  hasContracts: boolean;
+  status: "not_submitted" | "staged" | "needs_validation" | "in_review" | "reviewed" | "committed";
+  run: {
+    id: number;
+    status: string;
+    fileName: string | null;
+    totalRows: number;
+    validatedCount: number;
+    exceptionCount: number;
+    unresolvedCount: number;
+    startedAt: string;
+    runBy: string;
+  } | null;
+}
+
+interface QueueSummary {
+  period: string;
+  periodLabel: string;
+  totalDistributors: number;
+  notSubmitted: number;
+  needsValidation: number;
+  inReview: number;
+  completed: number;
+}
 
 export default function ReconciliationPageClient({
   distributors,
   initialRuns,
+  configuredDistributors,
 }: {
   distributors: Distributor[];
   initialRuns: ReconciliationRun[];
+  configuredDistributors: string[];
 }) {
   const [runs, setRuns] = useState<ReconciliationRun[]>(initialRuns);
   const [showUpload, setShowUpload] = useState(false);
@@ -76,11 +130,111 @@ export default function ReconciliationPageClient({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Validation state
-  const [validating, setValidating] = useState<number | null>(null); // runId being validated
+  const [validating, setValidating] = useState<number | null>(null);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
+
+  // Review state (Phase R3)
+  const [reviewRunId, setReviewRunId] = useState<number | null>(null);
+  const [reviewIssues, setReviewIssues] = useState<DbIssue[]>([]);
+  const [reviewProgress, setReviewProgress] = useState<RunProgress | null>(null);
+  const [loadingReview, setLoadingReview] = useState(false);
+  const [resolvingIssue, setResolvingIssue] = useState<number | null>(null);
+  const [bulkResolving, setBulkResolving] = useState(false);
+
+  // Commit state (Phase R4)
+  const [committing, setCommitting] = useState(false);
+  const [commitResult, setCommitResult] = useState<{
+    success: boolean;
+    summary?: { totalApproved: number; recordsCreated: number; recordsSuperseded: number; itemsCreated: number; confirmed: number; rejected: number; dismissed: number; deferred: number };
+    error?: string;
+    failedIssueId?: number;
+  } | null>(null);
+
+  // Reopen state
+  const [reopening, setReopening] = useState<number | null>(null);
+
+  // POS upload state
+  const [posUploadRunId, setPosUploadRunId] = useState<number | null>(null);
+  const [posFile, setPosFile] = useState<File | null>(null);
+  const [posUploading, setPosUploading] = useState(false);
+  const [posUploadResult, setPosUploadResult] = useState<{ success: boolean; parseResult?: ParseResult; error?: string } | null>(null);
+  const posFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Queue state
+  const [queuePeriod, setQueuePeriod] = useState<string>(getDefaultPeriod());
+  const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
+  const [queueSummary, setQueueSummary] = useState<QueueSummary | null>(null);
+  const [queueLoading, setQueueLoading] = useState(true);
+
+  const fetchQueue = useCallback(async (period: string) => {
+    setQueueLoading(true);
+    try {
+      const res = await fetch(`/api/reconciliation/queue?period=${period}`);
+      if (res.ok) {
+        const data = await res.json();
+        setQueueItems(data.queue);
+        setQueueSummary(data.summary);
+      }
+    } finally {
+      setQueueLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchQueue(queuePeriod); }, [queuePeriod, fetchQueue]);
+
+  // Refresh queue when runs change (after upload, validation, or review completion)
+  const refreshQueue = useCallback(() => fetchQueue(queuePeriod), [fetchQueue, queuePeriod]);
+
+  // Filter state for runs table
+  const [filterDistributor, setFilterDistributor] = useState<string>("");
+  const [filterStatus, setFilterStatus] = useState<string>("");
+  const [filterDateFrom, setFilterDateFrom] = useState<string>("");
+  const [filterDateTo, setFilterDateTo] = useState<string>("");
+  const [filterSearch, setFilterSearch] = useState<string>("");
 
   const selectedDistributor = distributors.find(d => d.id === Number(selectedDistributorId));
   const hasMapping = selectedDistributor ? configuredDistributors.includes(selectedDistributor.code) : false;
+
+  // Filtered runs
+  const filteredRuns = useMemo(() => {
+    return runs.filter(run => {
+      if (filterDistributor && run.distributor.code !== filterDistributor) return false;
+      if (filterStatus && run.status !== filterStatus) return false;
+      if (filterDateFrom) {
+        const periodStart = run.claimPeriodStart.slice(0, 10);
+        if (periodStart < filterDateFrom) return false;
+      }
+      if (filterDateTo) {
+        const periodEnd = run.claimPeriodEnd.slice(0, 10);
+        if (periodEnd > filterDateTo) return false;
+      }
+      if (filterSearch) {
+        const q = filterSearch.toLowerCase();
+        const matchId = `#${run.id}`.includes(q);
+        const matchDistributor = run.distributor.code.toLowerCase().includes(q) || run.distributor.name.toLowerCase().includes(q);
+        const matchFile = run.claimBatch?.fileName?.toLowerCase().includes(q);
+        const matchBy = run.runBy.displayName.toLowerCase().includes(q);
+        if (!matchId && !matchDistributor && !matchFile && !matchBy) return false;
+      }
+      return true;
+    });
+  }, [runs, filterDistributor, filterStatus, filterDateFrom, filterDateTo, filterSearch]);
+
+  // Unique statuses from current runs for filter dropdown
+  const availableStatuses = useMemo(() => {
+    return [...new Set(runs.map(r => r.status))].sort();
+  }, [runs]);
+
+  // Unique distributors from current runs for filter dropdown
+  const availableDistributors = useMemo(() => {
+    const codes = [...new Set(runs.map(r => r.distributor.code))].sort();
+    return codes.map(code => {
+      const run = runs.find(r => r.distributor.code === code)!;
+      return { code, name: run.distributor.name };
+    });
+  }, [runs]);
+
+  const hasActiveFilters = filterDistributor || filterStatus || filterDateFrom || filterDateTo || filterSearch;
 
   async function handleUpload() {
     if (!selectedFile || !selectedDistributorId || !claimPeriod) return;
@@ -131,8 +285,6 @@ export default function ReconciliationPageClient({
       if (res.ok) {
         setValidationResult(data);
         await refreshRuns();
-      } else {
-        setValidationResult(null);
       }
     } catch {
       // ignore
@@ -141,10 +293,172 @@ export default function ReconciliationPageClient({
     }
   }
 
+  const loadReviewIssues = useCallback(async (runId: number) => {
+    setLoadingReview(true);
+    try {
+      const res = await fetch(`/api/reconciliation/runs/${runId}/issues`);
+      if (res.ok) {
+        const data = await res.json();
+        setReviewIssues(data.issues);
+        setReviewProgress(data.progress);
+        setReviewRunId(runId);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingReview(false);
+    }
+  }, []);
+
+  async function handleReview(runId: number) {
+    // Clear validation result panel, show review panel instead
+    setValidationResult(null);
+    await loadReviewIssues(runId);
+  }
+
+  async function handleResolve(issueId: number, resolution: string, note?: string) {
+    setResolvingIssue(issueId);
+    try {
+      const res = await fetch(`/api/reconciliation/runs/${reviewRunId}/issues/${issueId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resolution, resolutionNote: note }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Update local state
+        setReviewIssues(prev =>
+          prev.map(issue =>
+            issue.id === issueId
+              ? { ...issue, resolution: data.issue.resolution, resolvedAt: data.issue.resolvedAt }
+              : issue
+          )
+        );
+        setReviewProgress(data.runProgress);
+        // If all resolved, refresh runs to update status
+        if (data.runProgress?.allResolved) {
+          await refreshRuns();
+        }
+      }
+    } catch {
+      // ignore
+    } finally {
+      setResolvingIssue(null);
+    }
+  }
+
+  async function handleBulkResolve(resolution: string, filter: 'all' | 'warnings' | 'errors') {
+    if (!reviewRunId) return;
+    setBulkResolving(true);
+
+    const pendingIssues = reviewIssues.filter(i => !i.resolution);
+    const filtered = filter === 'all'
+      ? pendingIssues
+      : filter === 'warnings'
+        ? pendingIssues.filter(i => i.severity === 'warning')
+        : pendingIssues.filter(i => i.severity === 'error');
+
+    const issueIds = filtered.map(i => i.id);
+    if (issueIds.length === 0) {
+      setBulkResolving(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/reconciliation/runs/${reviewRunId}/issues/bulk-resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ issueIds, resolution }),
+      });
+      if (res.ok) {
+        // Reload issues to get fresh state
+        await loadReviewIssues(reviewRunId);
+        await refreshRuns();
+      }
+    } catch {
+      // ignore
+    } finally {
+      setBulkResolving(false);
+    }
+  }
+
+  async function handlePosUpload() {
+    if (!posFile || !posUploadRunId) return;
+    setPosUploading(true);
+    setPosUploadResult(null);
+
+    const formData = new FormData();
+    formData.append("file", posFile);
+    formData.append("runId", String(posUploadRunId));
+
+    try {
+      const res = await fetch("/api/reconciliation/pos-upload", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPosUploadResult({ success: true, parseResult: data.parseResult });
+        await refreshRuns();
+      } else {
+        setPosUploadResult({ success: false, error: data.error || "POS upload failed", parseResult: data.parseResult });
+      }
+    } catch {
+      setPosUploadResult({ success: false, error: "Network error." });
+    } finally {
+      setPosUploading(false);
+    }
+  }
+
+  function closePosUpload() {
+    setPosUploadRunId(null);
+    setPosFile(null);
+    setPosUploadResult(null);
+    if (posFileInputRef.current) posFileInputRef.current.value = "";
+  }
+
   async function refreshRuns() {
     const runsRes = await fetch("/api/reconciliation/runs");
     if (runsRes.ok) {
       setRuns(await runsRes.json());
+    }
+    refreshQueue();
+  }
+
+  async function handleCommit(runId: number) {
+    setCommitting(true);
+    setCommitResult(null);
+    try {
+      const res = await fetch(`/api/reconciliation/runs/${runId}/commit`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCommitResult(data);
+        await refreshRuns();
+      } else {
+        setCommitResult({ success: false, error: data.error || "Commit failed" });
+      }
+    } catch {
+      setCommitResult({ success: false, error: "Network error" });
+    } finally {
+      setCommitting(false);
+    }
+  }
+
+  async function handleReopen(runId: number) {
+    if (!confirm("Reopen this run? All resolutions will be cleared and the run will return to review status.")) return;
+    setReopening(runId);
+    try {
+      const res = await fetch(`/api/reconciliation/runs/${runId}/reopen`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        await refreshRuns();
+      } else {
+        alert(data.error || "Failed to reopen run");
+      }
+    } catch {
+      alert("Network error");
+    } finally {
+      setReopening(null);
     }
   }
 
@@ -177,6 +491,139 @@ export default function ReconciliationPageClient({
         )}
       </div>
 
+      {/* Monthly Reconciliation Checklist */}
+      <div className="rounded-xl border border-brennan-border bg-white shadow-sm">
+        <div className="border-b border-brennan-border px-5 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <h2 className="text-base font-semibold text-brennan-text">Monthly Checklist</h2>
+              <input
+                type="month"
+                value={queuePeriod}
+                onChange={(e) => setQueuePeriod(e.target.value)}
+                className="rounded border border-gray-300 px-2 py-1 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue"
+              />
+            </div>
+            {queueSummary && (
+              <div className="flex items-center gap-4 text-xs">
+                <span className="text-green-700 font-medium">{queueSummary.completed} done</span>
+                <span className="text-amber-600 font-medium">{queueSummary.inReview + queueSummary.needsValidation} in progress</span>
+                <span className="text-gray-500">{queueSummary.notSubmitted} pending</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {queueLoading ? (
+          <div className="px-5 py-6 text-center text-sm text-gray-400">Loading...</div>
+        ) : (
+          <>
+            {/* Progress bar */}
+            {queueSummary && queueSummary.totalDistributors > 0 && (
+              <div className="px-5 pt-3 pb-1">
+                <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-gray-100">
+                  <div
+                    className="bg-green-500 transition-all"
+                    style={{ width: `${(queueSummary.completed / queueSummary.totalDistributors) * 100}%` }}
+                  />
+                  <div
+                    className="bg-amber-400 transition-all"
+                    style={{ width: `${((queueSummary.inReview + queueSummary.needsValidation) / queueSummary.totalDistributors) * 100}%` }}
+                  />
+                </div>
+                <p className="mt-1 text-xs text-gray-400 text-right">
+                  {queueSummary.completed}/{queueSummary.totalDistributors} distributors reconciled for {queueSummary.periodLabel}
+                </p>
+              </div>
+            )}
+
+            {/* Distributor checklist */}
+            <div className="divide-y divide-brennan-border">
+              {queueItems.filter(q => q.hasContracts).map((item) => (
+                <div key={item.distributorCode} className="flex items-center justify-between px-5 py-3 hover:bg-brennan-light/40 transition-colors">
+                  <div className="flex items-center gap-3">
+                    {/* Status icon */}
+                    <QueueStatusIcon status={item.status} />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded bg-brennan-blue/10 px-1.5 py-0.5 text-xs font-bold text-brennan-blue">
+                          {item.distributorCode}
+                        </span>
+                        <span className="text-sm font-medium text-brennan-text">{item.distributorName}</span>
+                      </div>
+                      {item.run && (
+                        <p className="mt-0.5 text-xs text-gray-400">
+                          {item.run.fileName ?? "Claim file"} — {item.run.totalRows} rows
+                          {item.run.exceptionCount > 0 && (
+                            <span className="text-amber-600 ml-1">
+                              ({item.run.unresolvedCount} unresolved of {item.run.exceptionCount} exceptions)
+                            </span>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <QueueStatusBadge status={item.status} />
+                    {item.status === "not_submitted" && (
+                      <button
+                        onClick={() => {
+                          const dist = distributors.find(d => d.id === item.distributorId);
+                          if (dist) {
+                            setSelectedDistributorId(String(dist.id));
+                            setClaimPeriod(queuePeriod);
+                            setShowUpload(true);
+                          }
+                        }}
+                        className="rounded bg-brennan-blue px-3 py-1 text-xs font-medium text-white hover:bg-brennan-blue/90"
+                      >
+                        Upload
+                      </button>
+                    )}
+                    {item.status === "needs_validation" && item.run && (
+                      <button
+                        onClick={() => handleValidate(item.run!.id)}
+                        disabled={validating !== null}
+                        className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-white hover:bg-amber-600 disabled:opacity-50"
+                      >
+                        {validating === item.run.id ? "Validating..." : "Validate"}
+                      </button>
+                    )}
+                    {item.status === "in_review" && item.run && (
+                      <button
+                        onClick={() => handleReview(item.run!.id)}
+                        className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-white hover:bg-amber-600"
+                      >
+                        Review ({item.run.unresolvedCount})
+                      </button>
+                    )}
+                    {item.status === "reviewed" && item.run && (
+                      <button
+                        onClick={() => handleCommit(item.run!.id)}
+                        disabled={committing}
+                        className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                      >
+                        {committing ? "Committing..." : "Commit"}
+                      </button>
+                    )}
+                    {item.status === "committed" && (
+                      <span className="text-xs text-green-600 font-medium">Committed</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {queueItems.filter(q => q.hasContracts).length === 0 && (
+                <div className="px-5 py-6 text-center text-sm text-gray-400">
+                  No distributors with active contracts.
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
       {/* Upload Panel */}
       {showUpload && (
         <div className="rounded-xl border border-brennan-border bg-white shadow-sm">
@@ -204,7 +651,10 @@ export default function ReconciliationPageClient({
                 </select>
                 {selectedDistributor && !hasMapping && (
                   <p className="mt-1 text-xs text-amber-600">
-                    No column mapping configured for {selectedDistributor.code}. Contact an administrator.
+                    No column mapping configured for {selectedDistributor.code}.{" "}
+                    <a href="/settings" className="underline text-brennan-blue hover:text-brennan-blue/80">
+                      Configure in Settings
+                    </a>
                   </p>
                 )}
               </div>
@@ -293,19 +743,29 @@ export default function ReconciliationPageClient({
         </div>
       )}
 
-      {/* Validation Results Panel */}
+      {/* Validation Results Panel (shown right after validation, before review) */}
       {validationResult && (
         <div className="rounded-xl border border-brennan-border bg-white shadow-sm">
           <div className="border-b border-brennan-border px-5 py-3 flex items-center justify-between">
             <h2 className="text-base font-semibold text-brennan-text">
               Validation Results — Run #{validationResult.runId}
             </h2>
-            <button
-              onClick={() => setValidationResult(null)}
-              className="text-xs text-gray-400 hover:text-gray-600"
-            >
-              Dismiss
-            </button>
+            <div className="flex items-center gap-3">
+              {validationResult.issues.length > 0 && (
+                <button
+                  onClick={() => handleReview(validationResult.runId)}
+                  className="rounded bg-brennan-blue px-3 py-1 text-xs font-medium text-white hover:bg-brennan-blue/90"
+                >
+                  Review Exceptions
+                </button>
+              )}
+              <button
+                onClick={() => setValidationResult(null)}
+                className="text-xs text-gray-400 hover:text-gray-600"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
 
           <div className="px-5 py-4">
@@ -369,11 +829,350 @@ export default function ReconciliationPageClient({
         </div>
       )}
 
+      {/* Exception Review Panel (Phase R3) */}
+      {reviewRunId && !validationResult && (
+        <div className="rounded-xl border border-brennan-border bg-white shadow-sm">
+          <div className="border-b border-brennan-border px-5 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <h2 className="text-base font-semibold text-brennan-text">
+                Exception Review — Run #{reviewRunId}
+              </h2>
+              {reviewProgress && (
+                <span className="text-xs text-gray-500">
+                  {reviewProgress.resolvedCount}/{reviewProgress.totalIssues} resolved
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => { setReviewRunId(null); setReviewIssues([]); setReviewProgress(null); }}
+              className="text-xs text-gray-400 hover:text-gray-600"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="px-5 py-4">
+            {loadingReview ? (
+              <div className="text-center py-6 text-sm text-gray-500">Loading issues...</div>
+            ) : (
+              <>
+                {/* Progress bar */}
+                {reviewProgress && reviewProgress.totalIssues > 0 && (
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-gray-500">Resolution Progress</span>
+                      <span className="text-xs font-medium text-gray-700">
+                        {Math.round((reviewProgress.resolvedCount / reviewProgress.totalIssues) * 100)}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className={`h-2 rounded-full transition-all ${reviewProgress.allResolved ? 'bg-green-500' : 'bg-brennan-blue'}`}
+                        style={{ width: `${(reviewProgress.resolvedCount / reviewProgress.totalIssues) * 100}%` }}
+                      />
+                    </div>
+                    {reviewProgress.allResolved && (
+                      <div className="mt-3 rounded-lg border border-green-200 bg-green-50 p-3">
+                        <p className="text-sm font-medium text-green-800">All exceptions resolved</p>
+                        <p className="mt-1 text-xs text-green-700">
+                          {reviewProgress.breakdown.approved ?? 0} approved, {reviewProgress.breakdown.rejected ?? 0} rejected, {reviewProgress.breakdown.dismissed ?? 0} dismissed
+                        </p>
+
+                        {commitResult?.success ? (
+                          <div className="mt-2 rounded border border-green-300 bg-white p-2">
+                            <p className="text-xs font-medium text-green-800">Committed to master data</p>
+                            <p className="text-xs text-green-700 mt-0.5">
+                              {commitResult.summary?.recordsCreated ?? 0} created, {commitResult.summary?.recordsSuperseded ?? 0} superseded, {commitResult.summary?.itemsCreated ?? 0} items, {commitResult.summary?.confirmed ?? 0} confirmed
+                            </p>
+                          </div>
+                        ) : commitResult?.error ? (
+                          <div className="mt-2 rounded border border-red-200 bg-red-50 p-2">
+                            <p className="text-xs text-red-700">{commitResult.error}</p>
+                            {commitResult.failedIssueId && (
+                              <p className="text-xs text-red-500 mt-0.5">Issue ID: {commitResult.failedIssueId}</p>
+                            )}
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => handleCommit(reviewRunId!)}
+                            disabled={committing}
+                            className="mt-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+                          >
+                            {committing ? "Committing..." : "Commit Approved Claims to Master Data"}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Bulk actions */}
+                {reviewProgress && reviewProgress.pendingCount > 0 && (
+                  <div className="flex items-center gap-2 mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <span className="text-xs font-medium text-gray-600 mr-2">Bulk actions:</span>
+                    <button
+                      onClick={() => handleBulkResolve('dismissed', 'warnings')}
+                      disabled={bulkResolving}
+                      className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-white disabled:opacity-50"
+                    >
+                      Dismiss all warnings
+                    </button>
+                    <button
+                      onClick={() => handleBulkResolve('rejected', 'errors')}
+                      disabled={bulkResolving}
+                      className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      Reject all errors
+                    </button>
+                    <button
+                      onClick={() => handleBulkResolve('approved', 'all')}
+                      disabled={bulkResolving}
+                      className="rounded border border-green-200 px-2 py-1 text-xs text-green-600 hover:bg-green-50 disabled:opacity-50"
+                    >
+                      Approve all pending
+                    </button>
+                    {bulkResolving && <span className="text-xs text-gray-400 ml-2">Processing...</span>}
+                  </div>
+                )}
+
+                {/* Issues table */}
+                {reviewIssues.length > 0 && (
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 text-left text-gray-500 uppercase tracking-wider">
+                          <th className="px-3 py-2">Code</th>
+                          <th className="px-3 py-2">Severity</th>
+                          <th className="px-3 py-2">Category</th>
+                          <th className="px-3 py-2">Description</th>
+                          <th className="px-3 py-2">Status</th>
+                          <th className="px-3 py-2 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {reviewIssues.map((issue) => (
+                          <tr
+                            key={issue.id}
+                            className={`hover:bg-gray-50/50 ${issue.resolution ? 'opacity-60' : ''}`}
+                          >
+                            <td className="px-3 py-2 font-mono font-medium">{issue.code}</td>
+                            <td className="px-3 py-2">
+                              <SeverityBadge severity={issue.severity} />
+                            </td>
+                            <td className="px-3 py-2 font-medium text-gray-700">{issue.category}</td>
+                            <td className="px-3 py-2 text-gray-600 max-w-md">{issue.description}</td>
+                            <td className="px-3 py-2">
+                              {issue.resolution ? (
+                                <ResolutionBadge resolution={issue.resolution} />
+                              ) : (
+                                <span className="text-gray-400 italic">pending</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              {issue.resolution ? (
+                                <button
+                                  onClick={() => handleResolve(issue.id, '')}
+                                  className="text-xs text-gray-400 hover:text-gray-600 underline"
+                                  title="Clear resolution to re-decide"
+                                  disabled
+                                >
+                                  {issue.resolvedBy?.displayName || ''}
+                                </button>
+                              ) : (
+                                <div className="flex items-center justify-end gap-1">
+                                  <button
+                                    onClick={() => handleResolve(issue.id, 'approved')}
+                                    disabled={resolvingIssue === issue.id}
+                                    className="rounded bg-green-50 border border-green-200 px-2 py-0.5 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
+                                    title="Approve this claim line"
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    onClick={() => handleResolve(issue.id, 'rejected')}
+                                    disabled={resolvingIssue === issue.id}
+                                    className="rounded bg-red-50 border border-red-200 px-2 py-0.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+                                    title="Reject this claim line"
+                                  >
+                                    Reject
+                                  </button>
+                                  <button
+                                    onClick={() => handleResolve(issue.id, 'dismissed')}
+                                    disabled={resolvingIssue === issue.id}
+                                    className="rounded bg-gray-50 border border-gray-200 px-2 py-0.5 text-xs font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                                    title="Dismiss — no action needed"
+                                  >
+                                    Dismiss
+                                  </button>
+                                  {resolvingIssue === issue.id && (
+                                    <span className="text-gray-400 ml-1">...</span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {reviewIssues.length === 0 && !loadingReview && (
+                  <div className="text-center py-6">
+                    <p className="text-sm text-gray-500">No exceptions for this run.</p>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Reconciliation Runs Table */}
       <div className="rounded-xl border border-brennan-border bg-white shadow-sm">
         <div className="border-b border-brennan-border px-5 py-3">
-          <h2 className="text-base font-semibold text-brennan-text">Reconciliation Runs</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-brennan-text">Reconciliation Runs</h2>
+            {runs.length > 0 && (
+              <span className="text-xs text-gray-400">
+                {filteredRuns.length === runs.length
+                  ? `${runs.length} runs`
+                  : `${filteredRuns.length} of ${runs.length} runs`}
+              </span>
+            )}
+          </div>
         </div>
+
+        {/* Filter bar — matches Records page pattern */}
+        {runs.length > 0 && (
+          <div className="border-b border-brennan-border bg-white px-5 py-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={filterDistributor}
+                onChange={(e) => setFilterDistributor(e.target.value)}
+                className="h-8 rounded border border-brennan-border bg-white px-2 text-xs text-brennan-text focus:border-brennan-blue focus:outline-none"
+              >
+                <option value="">All Distributors</option>
+                {availableDistributors.map((d) => (
+                  <option key={d.code} value={d.code}>{d.code} — {d.name}</option>
+                ))}
+              </select>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="h-8 rounded border border-brennan-border bg-white px-2 text-xs text-brennan-text focus:border-brennan-blue focus:outline-none"
+              >
+                <option value="">All Statuses</option>
+                {availableStatuses.map((s) => (
+                  <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                ))}
+              </select>
+
+              <div className="mx-1 h-5 w-px bg-brennan-border" />
+
+              <div className="flex items-center gap-1.5">
+                <label className="text-xs text-gray-400">From</label>
+                <input
+                  type="date"
+                  value={filterDateFrom}
+                  onChange={(e) => setFilterDateFrom(e.target.value)}
+                  className="h-8 rounded border border-brennan-border bg-white px-2 text-xs text-brennan-text focus:border-brennan-blue focus:outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <label className="text-xs text-gray-400">To</label>
+                <input
+                  type="date"
+                  value={filterDateTo}
+                  onChange={(e) => setFilterDateTo(e.target.value)}
+                  className="h-8 rounded border border-brennan-border bg-white px-2 text-xs text-brennan-text focus:border-brennan-blue focus:outline-none"
+                />
+              </div>
+
+              <div className="mx-1 h-5 w-px bg-brennan-border" />
+
+              <input
+                type="text"
+                placeholder="Search..."
+                value={filterSearch}
+                onChange={(e) => setFilterSearch(e.target.value)}
+                className="h-8 min-w-[160px] flex-1 rounded border border-brennan-border px-2 text-xs focus:border-brennan-blue focus:outline-none"
+              />
+              {hasActiveFilters && (
+                <button
+                  onClick={() => { setFilterDistributor(""); setFilterStatus(""); setFilterDateFrom(""); setFilterDateTo(""); setFilterSearch(""); }}
+                  className="text-xs text-gray-400 hover:text-gray-600"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* POS Upload Panel */}
+        {posUploadRunId && (
+          <div className="mx-5 mb-3 rounded-lg border border-indigo-200 bg-indigo-50/50 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-indigo-900">
+                Attach POS Report to Run #{posUploadRunId}
+              </h3>
+              <button onClick={closePosUpload} className="text-gray-400 hover:text-gray-600 text-xs">
+                Cancel
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">
+              Upload the distributor&apos;s POS (Point of Sale) report for cross-referencing against claim data.
+              POS data is supplementary — differences are flagged as warnings for review.
+            </p>
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <label className="block text-xs font-medium text-gray-700 mb-1">POS File (.xlsx, .csv)</label>
+                <input
+                  ref={posFileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={(e) => setPosFile(e.target.files?.[0] || null)}
+                  className="block w-full text-xs text-gray-500 file:mr-3 file:rounded file:border-0 file:bg-indigo-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-indigo-700 hover:file:bg-indigo-200"
+                />
+              </div>
+              <button
+                onClick={handlePosUpload}
+                disabled={!posFile || posUploading}
+                className="rounded bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {posUploading ? "Uploading..." : "Upload POS"}
+              </button>
+            </div>
+            {posUploadResult && (
+              <div className={`mt-3 rounded p-3 text-xs ${posUploadResult.success ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"}`}>
+                {posUploadResult.success ? (
+                  <div>
+                    <p className="font-medium text-green-800">POS file attached successfully.</p>
+                    {posUploadResult.parseResult && (
+                      <p className="text-green-700 mt-1">
+                        {posUploadResult.parseResult.totalRows} rows parsed
+                        ({posUploadResult.parseResult.validRows} valid, {posUploadResult.parseResult.errorRows} errors)
+                      </p>
+                    )}
+                    <button onClick={closePosUpload} className="mt-2 text-green-700 hover:underline font-medium">
+                      Done
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="font-medium text-red-800">{posUploadResult.error}</p>
+                    {posUploadResult.parseResult && (
+                      <p className="text-red-700 mt-1">
+                        {posUploadResult.parseResult.totalRows} rows found, {posUploadResult.parseResult.errorRows} had errors.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {runs.length === 0 ? (
           <div className="px-5 py-12 text-center">
@@ -395,13 +1194,27 @@ export default function ReconciliationPageClient({
                   <th className="px-4 py-2">Claim Lines</th>
                   <th className="px-4 py-2">Matched</th>
                   <th className="px-4 py-2">Exceptions</th>
+                  <th className="px-4 py-2">POS</th>
                   <th className="px-4 py-2">Started</th>
                   <th className="px-4 py-2">By</th>
                   <th className="px-4 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {runs.map((run) => (
+                {filteredRuns.length === 0 && (
+                  <tr>
+                    <td colSpan={11} className="px-4 py-8 text-center text-sm text-gray-400">
+                      No runs match your filters.{" "}
+                      <button
+                        onClick={() => { setFilterDistributor(""); setFilterStatus(""); setFilterDateFrom(""); setFilterDateTo(""); setFilterSearch(""); }}
+                        className="text-brennan-blue hover:underline"
+                      >
+                        Clear filters
+                      </button>
+                    </td>
+                  </tr>
+                )}
+                {filteredRuns.map((run) => (
                   <tr key={run.id} className="hover:bg-gray-50/50">
                     <td className="px-4 py-2 font-medium text-brennan-blue">#{run.id}</td>
                     <td className="px-4 py-2">
@@ -423,33 +1236,96 @@ export default function ReconciliationPageClient({
                     <td className="px-4 py-2">
                       {run._count.issues > 0 ? (
                         <span className="text-amber-600 font-medium">{run._count.issues}</span>
-                      ) : run.status === "completed" || run.status === "review" ? (
+                      ) : run.status === "reviewed" || run.status === "review" ? (
                         <span className="text-green-600">0</span>
                       ) : (
                         <span className="text-gray-400">—</span>
                       )}
                     </td>
+                    <td className="px-4 py-2">
+                      {run.posBatch ? (
+                        <span className="inline-flex items-center gap-1 text-xs">
+                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" />
+                          <span className="text-green-700 font-medium">{run.posBatch.validRows}</span>
+                          <span className="text-gray-400">rows</span>
+                        </span>
+                      ) : run.status !== "committed" ? (
+                        <button
+                          onClick={() => setPosUploadRunId(run.id)}
+                          className="text-xs text-brennan-blue hover:underline"
+                        >
+                          + Add POS
+                        </button>
+                      ) : (
+                        <span className="text-gray-400 text-xs">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-2 text-gray-500 text-xs">{formatDate(run.startedAt)}</td>
                     <td className="px-4 py-2 text-gray-500 text-xs">{run.runBy.displayName}</td>
                     <td className="px-4 py-2">
-                      {run.status === "staged" && (
-                        <button
-                          onClick={() => handleValidate(run.id)}
-                          disabled={validating === run.id}
-                          className="rounded bg-brennan-blue px-3 py-1 text-xs font-medium text-white hover:bg-brennan-blue/90 disabled:opacity-50"
-                        >
-                          {validating === run.id ? "Validating..." : "Validate"}
-                        </button>
-                      )}
-                      {(run.status === "review" || run.status === "completed") && (
-                        <button
-                          onClick={() => handleValidate(run.id)}
-                          disabled={validating === run.id}
-                          className="rounded border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                        >
-                          {validating === run.id ? "Re-validating..." : "Re-validate"}
-                        </button>
-                      )}
+                      <div className="flex items-center gap-1">
+                        {run.status === "staged" && (
+                          <button
+                            onClick={() => handleValidate(run.id)}
+                            disabled={validating === run.id}
+                            className="rounded bg-brennan-blue px-3 py-1 text-xs font-medium text-white hover:bg-brennan-blue/90 disabled:opacity-50"
+                          >
+                            {validating === run.id ? "Validating..." : "Validate"}
+                          </button>
+                        )}
+                        {run.status === "review" && (
+                          <>
+                            <button
+                              onClick={() => handleReview(run.id)}
+                              disabled={loadingReview}
+                              className="rounded bg-amber-50 border border-amber-200 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                            >
+                              Review
+                            </button>
+                            <button
+                              onClick={() => handleValidate(run.id)}
+                              disabled={validating === run.id}
+                              className="rounded border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              {validating === run.id ? "..." : "Re-validate"}
+                            </button>
+                          </>
+                        )}
+                        {run.status === "reviewed" && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleCommit(run.id)}
+                              disabled={committing}
+                              className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                            >
+                              {committing ? "..." : "Commit"}
+                            </button>
+                            <button
+                              onClick={() => handleReopen(run.id)}
+                              disabled={reopening === run.id}
+                              className="rounded border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                            >
+                              {reopening === run.id ? "..." : "Reopen"}
+                            </button>
+                            <button
+                              onClick={() => handleReview(run.id)}
+                              disabled={loadingReview}
+                              className="rounded border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              View
+                            </button>
+                          </div>
+                        )}
+                        {run.status === "committed" && (
+                          <button
+                            onClick={() => handleReview(run.id)}
+                            disabled={loadingReview}
+                            className="rounded border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                          >
+                            View
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -502,13 +1378,19 @@ function StatusBadge({ status }: { status: string }) {
     staged: "bg-blue-100 text-blue-700",
     running: "bg-yellow-100 text-yellow-700",
     review: "bg-amber-100 text-amber-700",
-    completed: "bg-green-100 text-green-700",
+    reviewed: "bg-indigo-100 text-indigo-700",
+    committed: "bg-green-100 text-green-700",
     cancelled: "bg-red-100 text-red-700",
+  };
+
+  const labels: Record<string, string> = {
+    reviewed: "ready to commit",
+    committed: "committed",
   };
 
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[status] || colors.draft}`}>
-      {status}
+      {labels[status] ?? status}
     </span>
   );
 }
@@ -522,6 +1404,82 @@ function SeverityBadge({ severity }: { severity: string }) {
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[severity] || colors.info}`}>
       {severity}
+    </span>
+  );
+}
+
+function QueueStatusIcon({ status }: { status: string }) {
+  if (status === "committed") {
+    return (
+      <svg className="h-5 w-5 text-green-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+      </svg>
+    );
+  }
+  if (status === "reviewed") {
+    return (
+      <svg className="h-5 w-5 text-indigo-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+      </svg>
+    );
+  }
+  if (status === "in_review") {
+    return (
+      <svg className="h-5 w-5 text-amber-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+      </svg>
+    );
+  }
+  if (status === "needs_validation" || status === "staged") {
+    return (
+      <svg className="h-5 w-5 text-blue-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+      </svg>
+    );
+  }
+  // not_submitted
+  return (
+    <svg className="h-5 w-5 text-gray-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+      <circle cx="12" cy="12" r="9" strokeDasharray="4 3" />
+    </svg>
+  );
+}
+
+function QueueStatusBadge({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    not_submitted: "bg-gray-100 text-gray-500",
+    staged: "bg-blue-100 text-blue-700",
+    needs_validation: "bg-blue-100 text-blue-700",
+    in_review: "bg-amber-100 text-amber-700",
+    reviewed: "bg-indigo-100 text-indigo-700",
+    committed: "bg-green-100 text-green-700",
+  };
+  const labels: Record<string, string> = {
+    not_submitted: "Not submitted",
+    staged: "Staged",
+    needs_validation: "Needs validation",
+    in_review: "In review",
+    reviewed: "Ready to commit",
+    committed: "Committed",
+  };
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${styles[status] ?? styles.not_submitted}`}>
+      {labels[status] ?? status}
+    </span>
+  );
+}
+
+function ResolutionBadge({ resolution }: { resolution: string }) {
+  const colors: Record<string, string> = {
+    approved: "bg-green-100 text-green-700",
+    rejected: "bg-red-100 text-red-700",
+    adjusted: "bg-blue-100 text-blue-700",
+    deferred: "bg-yellow-100 text-yellow-700",
+    dismissed: "bg-gray-100 text-gray-500",
+  };
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[resolution] || colors.dismissed}`}>
+      {resolution}
     </span>
   );
 }
