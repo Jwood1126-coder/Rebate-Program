@@ -24,13 +24,23 @@ interface SearchParams {
   page?: string;
 }
 
+// Entity filter keys that participate in cascading narrowing
+type EntityFilterKey = "distributor" | "contract" | "plan" | "endUser";
+
 /**
  * Build a Prisma WHERE clause from URL search params.
  * All filtering happens server-side — no silent truncation.
  * Uses AND array to safely combine independent filter conditions.
+ *
+ * @param exclude — optional set of entity filter keys to skip (used by cascading
+ *   filter options to compute available values for each dropdown).
  */
-function buildWhere(params: SearchParams): Prisma.RebateRecordWhereInput {
+function buildWhere(
+  params: SearchParams,
+  exclude?: Set<EntityFilterKey>,
+): Prisma.RebateRecordWhereInput {
   const conditions: Prisma.RebateRecordWhereInput[] = [];
+  const skip = exclude ?? new Set<EntityFilterKey>();
 
   // --- Entity filters (nested through plan → contract → distributor/endUser) ---
   const planWhere: Prisma.RebatePlanWhereInput = {};
@@ -38,17 +48,17 @@ function buildWhere(params: SearchParams): Prisma.RebateRecordWhereInput {
   let hasContractFilter = false;
   let hasPlanFilter = false;
 
-  if (params.distributor) {
+  if (!skip.has("distributor") && params.distributor) {
     contractWhere.distributor = { code: params.distributor };
     hasContractFilter = true;
   }
 
-  if (params.endUser) {
+  if (!skip.has("endUser") && params.endUser) {
     contractWhere.endUser = { name: params.endUser };
     hasContractFilter = true;
   }
 
-  if (params.contract) {
+  if (!skip.has("contract") && params.contract) {
     contractWhere.contractNumber = params.contract;
     hasContractFilter = true;
   }
@@ -58,7 +68,7 @@ function buildWhere(params: SearchParams): Prisma.RebateRecordWhereInput {
     hasPlanFilter = true;
   }
 
-  if (params.plan) {
+  if (!skip.has("plan") && params.plan) {
     planWhere.planCode = params.plan;
     hasPlanFilter = true;
   }
@@ -101,28 +111,81 @@ function buildWhere(params: SearchParams): Prisma.RebateRecordWhereInput {
 }
 
 /**
- * Fetch distinct values for filter dropdowns.
- * Each query is lightweight — just the distinct values for one dimension.
+ * Wraps a RebateRecord WHERE clause as a nested `{ some: ... }` filter usable
+ * from an entity table (distributor, contract, plan, endUser).
  */
-async function getFilterOptions() {
+function recordExistsFilter(
+  where: Prisma.RebateRecordWhereInput,
+): Prisma.RebateRecordListRelationFilter {
+  if (Object.keys(where).length === 0) return {};
+  return { some: where };
+}
+
+/**
+ * Cascading filter options: for each dropdown, compute available values by
+ * applying all *other* active filters. This ensures selecting a distributor
+ * narrows contracts/plans/endUsers to only matching values, and vice versa.
+ *
+ * When no filters are active, this degrades to returning all values (fast path).
+ */
+async function getCascadingFilterOptions(params: SearchParams) {
+  const recordsForDistributor = recordExistsFilter(
+    buildWhere(params, new Set(["distributor"])),
+  );
+  const recordsForContract = recordExistsFilter(
+    buildWhere(params, new Set(["contract"])),
+  );
+  const recordsForPlan = recordExistsFilter(
+    buildWhere(params, new Set(["plan"])),
+  );
+  const recordsForEndUser = recordExistsFilter(
+    buildWhere(params, new Set(["endUser"])),
+  );
+
   const [distributors, contracts, plans, endUsers] = await Promise.all([
     prisma.distributor.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        contracts: {
+          some: {
+            rebatePlans: {
+              some: { rebateRecords: recordsForDistributor },
+            },
+          },
+        },
+      },
       select: { code: true },
       orderBy: { code: "asc" },
     }),
     prisma.contract.findMany({
+      where: {
+        rebatePlans: {
+          some: { rebateRecords: recordsForContract },
+        },
+      },
       select: { contractNumber: true },
       orderBy: { contractNumber: "asc" },
       distinct: ["contractNumber"],
     }),
     prisma.rebatePlan.findMany({
+      where: {
+        rebateRecords: recordsForPlan,
+      },
       select: { planCode: true },
       orderBy: { planCode: "asc" },
       distinct: ["planCode"],
     }),
     prisma.endUser.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        contracts: {
+          some: {
+            rebatePlans: {
+              some: { rebateRecords: recordsForEndUser },
+            },
+          },
+        },
+      },
       select: { name: true },
       orderBy: { name: "asc" },
     }),
@@ -168,7 +231,7 @@ export default async function RecordsPage({
       take: PAGE_SIZE,
     }),
     prisma.rebateRecord.count({ where }),
-    getFilterOptions(),
+    getCascadingFilterOptions(params),
   ]);
 
   const records = rawRecords.map((r) => ({

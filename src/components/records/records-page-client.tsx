@@ -133,6 +133,30 @@ function RecordsPageInner({
     });
   }, [router]);
 
+  // --- Auto-clear stale selections ---
+  // When cascading options narrow and the currently selected value is no longer
+  // available, clear that filter so the user isn't stuck with an invisible selection.
+  useEffect(() => {
+    const stale: Record<string, string> = {};
+    if (filterDistributor && !filterOptions.distributors.includes(filterDistributor)) {
+      stale.distributor = "";
+    }
+    if (filterContract && !filterOptions.contracts.includes(filterContract)) {
+      stale.contract = "";
+    }
+    if (filterPlan && !filterOptions.plans.includes(filterPlan)) {
+      stale.plan = "";
+    }
+    if (filterEndUser && !filterOptions.endUsers.includes(filterEndUser)) {
+      stale.endUser = "";
+    }
+    if (Object.keys(stale).length > 0) {
+      updateParams(stale);
+    }
+  // Only run when filter options change (server re-rendered with narrowed options)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterOptions]);
+
   function handleEdit(record: RecordRow) {
     setEditRecord({
       id: record.id,
