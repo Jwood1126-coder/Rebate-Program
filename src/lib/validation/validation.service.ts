@@ -96,13 +96,21 @@ export async function validateRecord(
 
   // --- Duplicate and overlap detection (only if we have enough data) ---
   if (input.rebatePlanId && input.itemId && startDate) {
+    // IDs to exclude from duplicate/overlap checks: self (on update) + superseded record
+    const excludeIds: number[] = [];
+    if (context.existingRecordId) excludeIds.push(context.existingRecordId);
+    if (context.supersedesRecordId) excludeIds.push(context.supersedesRecordId);
+    const excludeClause = excludeIds.length > 0
+      ? { id: { notIn: excludeIds } }
+      : undefined;
+
     // Duplicate: same plan + item + start_date
     const duplicate = await prisma.rebateRecord.findFirst({
       where: {
         rebatePlanId: input.rebatePlanId,
         itemId: input.itemId,
         startDate: startDate,
-        ...(context.existingRecordId ? { NOT: { id: context.existingRecordId } } : {}),
+        ...excludeClause,
       },
     });
 
@@ -121,7 +129,7 @@ export async function validateRecord(
         rebatePlanId: input.rebatePlanId,
         itemId: input.itemId,
         status: { notIn: Array.from(OVERLAP_EXCLUDED_STATUSES) },
-        ...(context.existingRecordId ? { NOT: { id: context.existingRecordId } } : {}),
+        ...excludeClause,
       },
     });
 

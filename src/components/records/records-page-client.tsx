@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef, Suspense, useTransition } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { RecordModal } from "./record-modal";
+import { SupersedeModal } from "./supersede-modal";
 import { StatusBadge } from "./status-badge";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import type { RecordStatus } from "@/lib/constants/statuses";
@@ -65,6 +66,15 @@ function RecordsPageInner({
     rebatePrice: string;
     startDate: string;
     endDate: string;
+  } | null>(null);
+
+  // Supersede modal state
+  const [supersedeRecord, setSupersedeRecord] = useState<RecordRow | null>(null);
+
+  // Confirmation dialog state (expire / cancel)
+  const [confirmAction, setConfirmAction] = useState<{
+    type: "expire" | "cancel";
+    record: RecordRow;
   } | null>(null);
 
   // Entity edit modal state
@@ -172,6 +182,48 @@ function RecordsPageInner({
   function handleNewRecord() {
     setEditRecord(null);
     setModalOpen(true);
+  }
+
+  async function handleConfirmAction() {
+    if (!confirmAction) return;
+    const { type, record } = confirmAction;
+
+    const url = type === "expire"
+      ? `/api/records/${record.id}/expire`
+      : `/api/records/${record.id}`;
+    const method = type === "expire" ? "POST" : "DELETE";
+
+    try {
+      const res = await fetch(url, { method });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || `Failed to ${type} record`);
+        return;
+      }
+      router.refresh();
+    } catch {
+      alert("Network error");
+    } finally {
+      setConfirmAction(null);
+    }
+  }
+
+  // Which actions are available for a record based on its status
+  function getRowActions(r: RecordRow) {
+    const actions: { label: string; onClick: () => void; danger?: boolean }[] = [];
+    if (r.status === "active" || r.status === "future") {
+      actions.push({ label: "Edit", onClick: () => handleEdit(r) });
+      actions.push({ label: "Supersede", onClick: () => setSupersedeRecord(r) });
+      actions.push({ label: "Expire", onClick: () => setConfirmAction({ type: "expire", record: r }), danger: true });
+      actions.push({ label: "Cancel", onClick: () => setConfirmAction({ type: "cancel", record: r }), danger: true });
+    } else if (r.status === "draft") {
+      actions.push({ label: "Edit", onClick: () => handleEdit(r) });
+      actions.push({ label: "Cancel", onClick: () => setConfirmAction({ type: "cancel", record: r }), danger: true });
+    } else if (r.status === "expired") {
+      actions.push({ label: "Supersede", onClick: () => setSupersedeRecord(r) });
+    }
+    // superseded and cancelled records have no actions
+    return actions;
   }
 
   // Convert to SearchableSelect options
@@ -304,7 +356,7 @@ function RecordsPageInner({
               <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Start</th>
               <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">End</th>
               <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Status</th>
-              <th className="w-16 px-3 py-2.5" />
+              <th className="w-12 px-3 py-2.5" />
             </tr>
           </thead>
           <tbody className="divide-y divide-brennan-border">
@@ -360,12 +412,7 @@ function RecordsPageInner({
                 <td className="px-3 py-2 text-xs text-gray-500">{r.endDate || <span className="text-amber-500">Open</span>}</td>
                 <td className="px-3 py-2"><StatusBadge status={r.status} /></td>
                 <td className="px-3 py-2 text-right">
-                  <button
-                    onClick={() => handleEdit(r)}
-                    className="text-xs font-medium text-brennan-blue hover:text-brennan-dark"
-                  >
-                    Edit
-                  </button>
+                  <RowActions actions={getRowActions(r)} />
                 </td>
               </tr>
             ))}
@@ -429,6 +476,31 @@ function RecordsPageInner({
         onClose={() => setModalOpen(false)}
         record={editRecord}
       />
+
+      {/* Supersede modal */}
+      {supersedeRecord && (
+        <SupersedeModal
+          open
+          onClose={() => setSupersedeRecord(null)}
+          record={supersedeRecord}
+        />
+      )}
+
+      {/* Expire / Cancel confirmation */}
+      {confirmAction && (
+        <ConfirmDialog
+          title={confirmAction.type === "expire" ? "Expire Record" : "Cancel Record"}
+          message={
+            confirmAction.type === "expire"
+              ? `This will set the end date of Record #${confirmAction.record.id} to today, making it expire immediately. This action can be undone by editing the end date.`
+              : `This will cancel Record #${confirmAction.record.id}. Cancelled records are preserved for audit but no longer count as active pricing. This cannot be undone.`
+          }
+          confirmLabel={confirmAction.type === "expire" ? "Expire" : "Cancel Record"}
+          danger={confirmAction.type === "cancel"}
+          onConfirm={handleConfirmAction}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
 
       {/* Entity edit modals */}
       {entityModal?.type === "distributor" && (
@@ -761,6 +833,130 @@ function EntityEditModal({
             </button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Row action dropdown — shows available actions for a record based on its status.
+ */
+function RowActions({
+  actions,
+}: {
+  actions: { label: string; onClick: () => void; danger?: boolean }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  if (actions.length === 0) return null;
+
+  // Single action: show as direct button
+  if (actions.length === 1) {
+    return (
+      <button
+        onClick={actions[0].onClick}
+        className={`text-xs font-medium ${
+          actions[0].danger
+            ? "text-red-500 hover:text-red-700"
+            : "text-brennan-blue hover:text-brennan-dark"
+        }`}
+      >
+        {actions[0].label}
+      </button>
+    );
+  }
+
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        onClick={() => setOpen(!open)}
+        className="rounded p-1 text-gray-400 hover:bg-brennan-light hover:text-gray-600"
+      >
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 min-w-[120px] rounded-lg border border-brennan-border bg-white py-1 shadow-lg">
+          {actions.map((action) => (
+            <button
+              key={action.label}
+              onClick={() => {
+                setOpen(false);
+                action.onClick();
+              }}
+              className={`block w-full px-3 py-1.5 text-left text-xs font-medium transition-colors ${
+                action.danger
+                  ? "text-red-600 hover:bg-red-50"
+                  : "text-brennan-text hover:bg-brennan-light"
+              }`}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Generic confirmation dialog for dangerous actions (expire, cancel).
+ */
+function ConfirmDialog({
+  title,
+  message,
+  confirmLabel,
+  danger,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onCancel} />
+      <div className="relative w-full max-w-sm rounded-xl bg-white shadow-2xl">
+        <div className="px-5 py-4">
+          <h3 className="text-base font-bold text-brennan-text">{title}</h3>
+          <p className="mt-2 text-sm text-gray-600">{message}</p>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-brennan-border px-5 py-3">
+          <button
+            onClick={onCancel}
+            className="rounded-lg border border-brennan-border bg-white px-4 py-2 text-sm font-medium text-brennan-text transition-colors hover:bg-brennan-light"
+          >
+            Go Back
+          </button>
+          <button
+            onClick={onConfirm}
+            className={`rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors ${
+              danger
+                ? "bg-red-600 hover:bg-red-700"
+                : "bg-brennan-blue hover:bg-brennan-dark"
+            }`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
       </div>
     </div>
   );

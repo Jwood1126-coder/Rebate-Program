@@ -30,5 +30,6 @@ export interface RecordValidationInput {
 export interface RecordValidationContext {
   mode: "create" | "update";
   existingRecordId?: number; // for update, to exclude self from overlap
+  supersedesRecordId?: number; // for supersede, to exclude the old record from overlap
   userId: number;
 }
