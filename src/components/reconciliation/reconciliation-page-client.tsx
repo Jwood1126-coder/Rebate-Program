@@ -64,7 +64,10 @@ interface DbIssue {
   category: string;
   description: string;
   claimRowId: number | null;
+  masterRecordId: number | null;
+  committedRecordId: number | null;
   suggestedAction: string;
+  suggestedData: Record<string, unknown> | null;
   resolution: string | null;
   resolutionNote: string | null;
   resolvedById: number | null;
@@ -945,6 +948,7 @@ export default function ReconciliationPageClient({
                           <th className="px-3 py-2">Severity</th>
                           <th className="px-3 py-2">Category</th>
                           <th className="px-3 py-2">Description</th>
+                          <th className="px-3 py-2">Context</th>
                           <th className="px-3 py-2">Status</th>
                           <th className="px-3 py-2 text-right">Actions</th>
                         </tr>
@@ -961,6 +965,9 @@ export default function ReconciliationPageClient({
                             </td>
                             <td className="px-3 py-2 font-medium text-gray-700">{issue.category}</td>
                             <td className="px-3 py-2 text-gray-600 max-w-md">{issue.description}</td>
+                            <td className="px-3 py-2">
+                              <IssueContextLinks issue={issue} />
+                            </td>
                             <td className="px-3 py-2">
                               {issue.resolution ? (
                                 <ResolutionBadge resolution={issue.resolution} />
@@ -1392,6 +1399,62 @@ function StatusBadge({ status }: { status: string }) {
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[status] || colors.draft}`}>
       {labels[status] ?? status}
     </span>
+  );
+}
+
+/**
+ * Renders contextual deep links for a reconciliation issue.
+ * Links to the relevant contract detail page and/or records workspace.
+ */
+function IssueContextLinks({ issue }: { issue: DbIssue }) {
+  const sd = issue.suggestedData;
+  const contractId = sd?.contractId as number | null | undefined;
+  const contractNumber = sd?.contractNumber as string | null | undefined;
+
+  const links: { label: string; href: string; title: string }[] = [];
+
+  // Link to contract detail page
+  if (contractId) {
+    links.push({
+      label: "Contract",
+      href: `/contracts/${contractId}`,
+      title: `View contract ${contractNumber || contractId}`,
+    });
+  } else if (issue.code === "CLM-004" && contractNumber) {
+    // Contract not found — link to contracts search
+    links.push({
+      label: "Search",
+      href: `/contracts?search=${encodeURIComponent(contractNumber)}`,
+      title: `Search for contract "${contractNumber}"`,
+    });
+  }
+
+  // Note: masterRecordId and committedRecordId are available on issues but
+  // the Records page has no record-ID filter. Deep link deferred until a
+  // record detail view or ID-based filter is added.
+
+  if (links.length === 0) {
+    return <span className="text-gray-300">—</span>;
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {links.map((link) => (
+        <a
+          key={link.label}
+          href={link.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={link.title}
+          className="inline-flex items-center gap-0.5 rounded bg-brennan-blue/10 px-1.5 py-0.5 text-xs font-medium text-brennan-blue hover:bg-brennan-blue/20 transition-colors"
+        >
+          {link.label}
+          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+          </svg>
+        </a>
+      ))}
+    </div>
   );
 }
 

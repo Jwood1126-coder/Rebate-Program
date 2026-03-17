@@ -188,6 +188,9 @@ describe('validateRun', () => {
     expect(issue).toBeDefined();
     expect(issue!.severity).toBe('error');
     expect(issue!.description).toContain('999999');
+    // CLM-004 must carry contractNumber in suggestedData for deep-link navigation
+    expect(issue!.suggestedData).toBeDefined();
+    expect((issue!.suggestedData as Record<string, unknown>).contractNumber).toBe('999999');
   });
 
   it('detects CLM-007: Contract Expired', async () => {
@@ -283,6 +286,7 @@ describe('validateRun', () => {
       newPrice: 6.00,
       planId: 50,
       itemId: 1,
+      contractId: 1,
     });
   });
 

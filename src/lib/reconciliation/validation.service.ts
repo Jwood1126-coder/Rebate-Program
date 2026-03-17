@@ -125,6 +125,9 @@ export async function validateRun(runId: number): Promise<ValidationResult> {
         description: `Contract "${contractNumber}" not found for distributor ${run.distributor.code}.`,
         rowNumber: row.rowNumber,
         suggestedAction: 'flag_review',
+        suggestedData: {
+          contractNumber,
+        },
       });
     } else {
       // --- CLM-007: Contract Expired / Not Yet Effective ---
@@ -173,6 +176,7 @@ export async function validateRun(runId: number): Promise<ValidationResult> {
           itemNumber,
           claimedPrice: deviatedPrice,
           contractNumber,
+          contractId: contract?.id ?? null,
         },
       });
     }
@@ -210,6 +214,7 @@ export async function validateRun(runId: number): Promise<ValidationResult> {
             candidatePlanIds: contract.planIds,
             itemId: item.id,
             claimedPrice: deviatedPrice,
+            contractId: contract.id,
           },
         });
       } else if (matchResult.type === 'ambiguous') {
@@ -228,6 +233,7 @@ export async function validateRun(runId: number): Promise<ValidationResult> {
           suggestedData: {
             candidateRecordIds: matchResult.candidates.map(r => r.id),
             candidatePlanIds: [...new Set(matchResult.candidates.map(r => r.rebatePlanId))],
+            contractId: contract.id,
           },
         });
         // Still treat as matched for row status — user must resolve ambiguity
@@ -261,6 +267,7 @@ export async function validateRun(runId: number): Promise<ValidationResult> {
                 newPrice: deviatedPrice,
                 planId: record.rebatePlanId,
                 itemId: item.id,
+                contractId: contract.id,
               },
             });
           }
