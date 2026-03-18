@@ -4,6 +4,40 @@ All notable changes to this project are documented in this file, grouped by sess
 
 ---
 
+## 2026-03-18 — Action Reversibility Audit
+
+### Contract Approval Undo
+- Approved contracts can be reverted to `pending_review` via "Revert to Pending Review" button
+- Rejected (cancelled) contracts can also be reverted — shows on a red banner with clear copy
+- All transitions fully audited
+
+### Record Restore
+- New `POST /api/records/:id/restore` endpoint
+- Cancelled records show a "Restore" button (green) on detail page and in table row actions
+- Restores by re-deriving status from dates (active, expired, or future)
+- Cancel confirmation dialog updated: "can be restored later" instead of "cannot be undone"
+
+### Confirmation Dialogs
+- Contract reject now has `confirm()` dialog
+- All destructive actions verified to have confirmation before execution
+
+### Reversibility Summary
+| Action | Reversible | Method |
+|--------|-----------|--------|
+| Contract approve | Yes | Revert to Pending Review |
+| Contract reject | Yes | Revert to Pending Review |
+| Record cancel | Yes | Restore button |
+| Record expire | Yes | Edit end date |
+| Record supersede | No (by design) | Immutable history chain |
+| Reconciliation commit | No (by design) | Atomic master data |
+| Contract update commit | No (by design) | Atomic master data |
+
+### Seed Data
+- Seed simplified to users, distributors, and end users only — no sample contracts/records
+- Upload test data to populate from scratch
+
+---
+
 ## 2026-03-18 — Contract Updates, Approval Workflow, Reconciliation UX Split
 
 ### Contract Update Management (Phases A–E)
