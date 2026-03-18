@@ -91,12 +91,12 @@ export const POS_FIELD_LABELS: Record<PosFieldName, { label: string; required: b
 };
 
 const POS_SUGGESTION_PATTERNS: Record<PosFieldName, RegExp[]> = {
-  itemNumber:            [/vendor[\s._-]?part/i, /brennan[\s._-]?p[\/]?n/i, /part[\s._-]?num/i, /item[\s._-]?num/i, /mfg[\s._-]?part/i, /marten/i],
+  itemNumber:            [/vendor[\s._-]?part/i, /brennan[\s._-]?p[\/]?n/i, /part[\s._-]?num/i, /^part[\s._-]?number$/i, /item[\s._-]?num/i, /^item$/i, /mfg[\s._-]?part/i, /marten/i],
   quantity:              [/qty[\s._-]?std/i, /qty[\s._-]?ship/i, /qty/i, /quantity/i, /units/i],
   transactionDate:       [/ship[\s._-]?date/i, /invoice[\s._-]?date/i, /trans[\s._-]?date/i, /sale[\s._-]?date/i, /date/i],
   sellPrice:             [/sell[\s._-]?price/i, /unit[\s._-]?price/i, /price/i, /net[\s._-]?price/i],
   endUserCode:           [/ship[\s._-]?to[\s._-]?(?:code|id|cust)/i, /global[\s._-]?id/i, /customer[\s._-]?(?:code|id|num)/i, /end[\s._-]?user[\s._-]?code/i],
-  endUserName:           [/ship[\s._-]?to[\s._-]?(?:name|company)/i, /customer[\s._-]?name/i, /end[\s._-]?user[\s._-]?name/i, /marketing[\s._-]?code/i],
+  endUserName:           [/ship[\s._-]?to[\s._-]?(?:name|company)/i, /customer[\s._-]?name/i, /end[\s._-]?user[\s._-]?name/i, /^end[\s._-]?user$/i, /marketing[\s._-]?code/i],
   orderNumber:           [/invoice[\s._-]?num/i, /order[\s._-]?num/i, /po[\s._-]?num/i, /invoice$/i],
   distributorItemNumber: [/store[\s._-]?item/i, /dist[\s._-]?item/i, /catalog[\s._-]?num/i, /upc/i],
   extendedAmount:        [/extend/i, /total[\s._-]?amount/i, /line[\s._-]?total/i, /net[\s._-]?amount/i, /qty[\s._-]?std[\s._-]?\$/i],

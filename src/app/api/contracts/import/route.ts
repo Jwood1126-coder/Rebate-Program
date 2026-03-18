@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth/session';
 import { canEdit } from '@/lib/auth/roles';
+import { CONTRACT_TYPES } from '@/lib/constants/statuses';
 import {
   previewContractImport,
   commitContractImport,
@@ -72,6 +73,9 @@ export async function POST(request: NextRequest) {
   const planName = formData.get('planName') ? String(formData.get('planName')) : undefined;
   const discountType = String(formData.get('discountType') || 'part');
   const description = formData.get('description') ? String(formData.get('description')) : undefined;
+  const customerNumber = formData.get('customerNumber') ? String(formData.get('customerNumber')) : undefined;
+  const contractType = String(formData.get('contractType') || 'fixed_term');
+  const noticePeriodDays = formData.get('noticePeriodDays') ? Number(formData.get('noticePeriodDays')) : undefined;
   const startDate = String(formData.get('startDate') || '');
   const endDate = formData.get('endDate') ? String(formData.get('endDate')) : undefined;
 
@@ -80,6 +84,21 @@ export async function POST(request: NextRequest) {
   }
   if (!startDate) {
     return NextResponse.json({ error: 'Start date is required' }, { status: 400 });
+  }
+
+  // Validate contract type — same invariants as direct contract API
+  const validTypes: string[] = Object.values(CONTRACT_TYPES);
+  if (!validTypes.includes(contractType)) {
+    return NextResponse.json(
+      { error: `Invalid contract type. Must be one of: ${validTypes.join(', ')}` },
+      { status: 400 }
+    );
+  }
+  if (contractType === CONTRACT_TYPES.FIXED_TERM && !endDate) {
+    return NextResponse.json(
+      { error: 'Fixed-term contracts require an end date.' },
+      { status: 400 }
+    );
   }
 
   // Column mapping from user confirmation
@@ -98,6 +117,9 @@ export async function POST(request: NextRequest) {
     planName,
     discountType,
     description,
+    customerNumber,
+    contractType,
+    noticePeriodDays,
     startDate,
     endDate,
   };

@@ -14,7 +14,7 @@ import type {
   ParseError,
   StandardFieldName,
 } from './types';
-import { REQUIRED_FIELDS } from './types';
+import { REQUIRED_FIELDS, ARITHMETIC_TOLERANCE } from './types';
 
 /**
  * Parse a claim file buffer using the provided column mapping.
@@ -192,8 +192,7 @@ function mapAndValidateRow(
   // Arithmetic check: claimedAmount should ≈ (standardPrice - deviatedPrice) × quantity
   if (standardPrice !== null && deviatedPrice !== null && quantity !== null && claimedAmount !== null) {
     const expected = (standardPrice - deviatedPrice) * quantity;
-    const tolerance = 0.02; // 2 cents tolerance for rounding
-    if (Math.abs(claimedAmount - expected) > tolerance) {
+    if (Math.abs(claimedAmount - expected) > ARITHMETIC_TOLERANCE) {
       parseErrors.push({
         field: 'claimedAmount',
         message: `Arithmetic mismatch: claimed $${claimedAmount.toFixed(2)}, expected $${expected.toFixed(2)} = (${standardPrice.toFixed(4)} - ${deviatedPrice.toFixed(4)}) × ${quantity}.`,

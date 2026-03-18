@@ -7,13 +7,14 @@ import Link from "next/link";
 interface ContractRow {
   id: number;
   contractNumber: string;
+  customerNumber: string | null;
+  contractType: string;
   distributor: string;
   distributorName: string;
   endUser: string;
   startDate: string;
   endDate: string;
   status: string;
-  planCount: number;
   recordCount: number;
   updatedAt: string;
   description: string | null;
@@ -35,9 +36,17 @@ interface Props {
 }
 
 const statusColors: Record<string, string> = {
+  pending_review: "bg-amber-100 text-amber-700",
   active: "bg-emerald-100 text-emerald-700",
   expired: "bg-gray-100 text-gray-600",
   cancelled: "bg-red-100 text-red-700",
+};
+
+const statusLabels: Record<string, string> = {
+  pending_review: "Pending Review",
+  active: "Active",
+  expired: "Expired",
+  cancelled: "Cancelled",
 };
 
 export function ContractsPageClient({
@@ -133,7 +142,7 @@ export function ContractsPageClient({
         >
           <option value="">All Statuses</option>
           {filterOptions.statuses.map((s) => (
-            <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+            <option key={s} value={s}>{statusLabels[s] || s}</option>
           ))}
         </select>
 
@@ -163,14 +172,15 @@ export function ContractsPageClient({
           <thead>
             <tr className="border-b border-brennan-border bg-brennan-light/50 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
               <th className="px-3 py-2">Contract #</th>
+              <th className="px-3 py-2">Customer #</th>
               <th className="px-3 py-2">Distributor</th>
               <th className="px-3 py-2">End User</th>
               <th className="px-3 py-2">Start</th>
               <th className="px-3 py-2">End</th>
               <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2 text-center">Plans</th>
               <th className="px-3 py-2 text-center">Records</th>
               <th className="px-3 py-2">Updated</th>
+              <th className="px-3 py-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -183,6 +193,14 @@ export function ContractsPageClient({
                   >
                     {c.contractNumber}
                   </Link>
+                  {c.contractType === "evergreen" && (
+                    <span className="ml-1.5 rounded bg-teal-100 px-1 py-0.5 text-[10px] font-bold text-teal-700" title="Evergreen contract">
+                      EG
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-xs font-mono text-gray-600">
+                  {c.customerNumber || "—"}
                 </td>
                 <td className="px-3 py-2">
                   <span className="rounded bg-brennan-blue/10 px-1.5 py-0.5 text-xs font-bold text-brennan-blue">
@@ -196,19 +214,26 @@ export function ContractsPageClient({
                 </td>
                 <td className="px-3 py-2">
                   <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[c.status] || "bg-gray-100 text-gray-600"}`}>
-                    {c.status}
+                    {statusLabels[c.status] || c.status}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-center text-xs text-gray-600">{c.planCount}</td>
                 <td className="px-3 py-2 text-center text-xs text-gray-600">{c.recordCount}</td>
                 <td className="px-3 py-2 text-xs text-gray-400">
                   {new Date(c.updatedAt).toLocaleDateString()}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <Link
+                    href={`/contracts/${c.id}/update`}
+                    className="rounded bg-brennan-blue px-2.5 py-1 text-xs font-medium text-white hover:bg-brennan-dark"
+                  >
+                    Update
+                  </Link>
                 </td>
               </tr>
             ))}
             {contracts.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-3 py-8 text-center text-sm text-gray-400">
+                <td colSpan={10} className="px-3 py-8 text-center text-sm text-gray-400">
                   {hasFilters ? "No contracts match the current filters." : "No contracts yet."}
                 </td>
               </tr>

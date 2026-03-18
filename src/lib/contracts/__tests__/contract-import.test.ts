@@ -240,6 +240,167 @@ describe('commitSimpleImport', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Tests: commitSimpleImport — evergreen/fixed-term contract invariants
+// ---------------------------------------------------------------------------
+
+describe('commitSimpleImport contract type handling', () => {
+  beforeEach(resetAllMocks);
+
+  it('creates an evergreen contract with noticePeriodDays', async () => {
+    await mockXlsxForSimpleParse([
+      { 'Part Number': 'PART-1', Price: '10.00' },
+    ]);
+
+    const context: SimpleImportContext = {
+      ...defaultContext,
+      contractType: 'evergreen',
+      noticePeriodDays: 30,
+      endDate: undefined,
+    };
+
+    const result = await commitSimpleImport(Buffer.from('fake'), 'test.xlsx', context, 1);
+    expect(result.success).toBe(true);
+
+    const contractCreateCall = mockPrisma._tx.contract.create.mock.calls[0][0];
+    expect(contractCreateCall.data.contractType).toBe('evergreen');
+    expect(contractCreateCall.data.noticePeriodDays).toBe(30);
+    expect(contractCreateCall.data.endDate).toBeNull();
+  });
+
+  it('creates a fixed-term contract with null noticePeriodDays even if provided', async () => {
+    await mockXlsxForSimpleParse([
+      { 'Part Number': 'PART-1', Price: '10.00' },
+    ]);
+
+    // Simulates a stale/malicious client sending noticePeriodDays with fixed_term
+    const context: SimpleImportContext = {
+      ...defaultContext,
+      contractType: 'fixed_term',
+      noticePeriodDays: 60,
+    };
+
+    const result = await commitSimpleImport(Buffer.from('fake'), 'test.xlsx', context, 1);
+    expect(result.success).toBe(true);
+
+    const contractCreateCall = mockPrisma._tx.contract.create.mock.calls[0][0];
+    expect(contractCreateCall.data.contractType).toBe('fixed_term');
+    // noticePeriodDays should be null — fixed-term contracts never carry it
+    expect(contractCreateCall.data.noticePeriodDays).toBeNull();
+  });
+
+  it('defaults contractType to fixed_term when not provided', async () => {
+    await mockXlsxForSimpleParse([
+      { 'Part Number': 'PART-1', Price: '10.00' },
+    ]);
+
+    // Omit contractType entirely
+    const context: SimpleImportContext = {
+      distributorId: 1,
+      endUserId: 2,
+      planCode: 'OSW',
+      discountType: 'part',
+      startDate: '2026-01-01',
+      endDate: '2026-12-31',
+    };
+
+    const result = await commitSimpleImport(Buffer.from('fake'), 'test.xlsx', context, 1);
+    expect(result.success).toBe(true);
+
+    const contractCreateCall = mockPrisma._tx.contract.create.mock.calls[0][0];
+    expect(contractCreateCall.data.contractType).toBe('fixed_term');
+  });
+
+  it('includes contractType in audit log entry', async () => {
+    await mockXlsxForSimpleParse([
+      { 'Part Number': 'PART-1', Price: '10.00' },
+    ]);
+
+    const context: SimpleImportContext = {
+      ...defaultContext,
+      contractType: 'evergreen',
+      noticePeriodDays: 60,
+      endDate: undefined,
+    };
+
+    await commitSimpleImport(Buffer.from('fake'), 'test.xlsx', context, 1);
+
+    // First audit entry should be for the contract
+    const auditCalls = mockPrisma._tx.auditLog.create.mock.calls;
+    const contractAudit = auditCalls.find(
+      (c: Array<{ data: { tableName: string } }>) => c[0].data.tableName === 'contracts'
+    );
+    expect(contractAudit).toBeDefined();
+    // changedFields is already an object (from computeInsertSnapshot mock)
+    const changedFields = contractAudit![0].data.changedFields as Record<string, unknown>;
+    expect(changedFields.contractType).toBeDefined();
+  });
+
+  it('includes customerNumber in audit log entry when provided', async () => {
+    await mockXlsxForSimpleParse([
+      { 'Part Number': 'PART-1', Price: '10.00' },
+    ]);
+
+    const context: SimpleImportContext = {
+      ...defaultContext,
+      customerNumber: 'CUST-42',
+    };
+
+    await commitSimpleImport(Buffer.from('fake'), 'test.xlsx', context, 1);
+
+    const auditCalls = mockPrisma._tx.auditLog.create.mock.calls;
+    const contractAudit = auditCalls.find(
+      (c: Array<{ data: { tableName: string } }>) => c[0].data.tableName === 'contracts'
+    );
+    expect(contractAudit).toBeDefined();
+    const changedFields = contractAudit![0].data.changedFields as Record<string, unknown>;
+    expect(changedFields.customerNumber).toBeDefined();
+  });
+
+  it('stores customerNumber on the created contract', async () => {
+    await mockXlsxForSimpleParse([
+      { 'Part Number': 'PART-1', Price: '10.00' },
+    ]);
+
+    const context: SimpleImportContext = {
+      ...defaultContext,
+      customerNumber: 'CUST-42',
+    };
+
+    const result = await commitSimpleImport(Buffer.from('fake'), 'test.xlsx', context, 1);
+    expect(result.success).toBe(true);
+
+    const contractCreateCall = mockPrisma._tx.contract.create.mock.calls[0][0];
+    expect(contractCreateCall.data.customerNumber).toBe('CUST-42');
+  });
+
+  it('creates contract with pending_review status', async () => {
+    await mockXlsxForSimpleParse([
+      { 'Part Number': 'PART-1', Price: '10.00' },
+    ]);
+
+    const result = await commitSimpleImport(Buffer.from('fake'), 'test.xlsx', defaultContext, 1);
+    expect(result.success).toBe(true);
+
+    const contractCreateCall = mockPrisma._tx.contract.create.mock.calls[0][0];
+    expect(contractCreateCall.data.status).toBe('pending_review');
+  });
+
+  it('creates plans with active status (not pending_review)', async () => {
+    await mockXlsxForSimpleParse([
+      { 'Part Number': 'PART-1', Price: '10.00' },
+    ]);
+
+    const result = await commitSimpleImport(Buffer.from('fake'), 'test.xlsx', defaultContext, 1);
+    expect(result.success).toBe(true);
+
+    // Plan should be active even though the contract is pending_review.
+    // Approval is a contract-level concept, not a plan-level concept.
+    const planCreateCall = mockPrisma._tx.rebatePlan.create.mock.calls[0][0];
+    expect(planCreateCall.data.status).toBe('active');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Tests: commitContractImport
 // ---------------------------------------------------------------------------
 

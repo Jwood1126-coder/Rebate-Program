@@ -11,10 +11,18 @@ export const RECORD_STATUSES = {
 } as const;
 
 export const CONTRACT_STATUSES = {
+  PENDING_REVIEW: "pending_review",
   ACTIVE: "active",
   EXPIRED: "expired",
   CANCELLED: "cancelled",
 } as const;
+
+export const CONTRACT_TYPES = {
+  FIXED_TERM: "fixed_term",
+  EVERGREEN: "evergreen",
+} as const;
+
+export type ContractType = (typeof CONTRACT_TYPES)[keyof typeof CONTRACT_TYPES];
 
 export const PLAN_STATUSES = {
   ACTIVE: "active",
@@ -76,3 +84,36 @@ export type DiscountType = (typeof DISCOUNT_TYPES)[keyof typeof DISCOUNT_TYPES];
 export type UserRole = (typeof USER_ROLES)[keyof typeof USER_ROLES];
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
 export type NoteType = (typeof NOTE_TYPES)[keyof typeof NOTE_TYPES];
+
+// Contract update run statuses
+export const CONTRACT_UPDATE_STATUSES = {
+  STAGED: "staged",
+  REVIEW: "review",
+  COMMITTED: "committed",
+  CANCELLED: "cancelled",
+} as const;
+
+// Contract update diff types
+export const DIFF_TYPES = {
+  CHANGED: "changed",
+  ADDED: "added",
+  REMOVED: "removed",
+} as const;
+
+// Contract update file modes
+export const FILE_MODES = {
+  SNAPSHOT: "snapshot",
+  DELTA: "delta",
+} as const;
+
+// Contract update diff match statuses
+export const MATCH_STATUSES = {
+  AUTO: "auto",
+  AMBIGUOUS: "ambiguous",
+  MANUAL: "manual",
+} as const;
+
+export type ContractUpdateStatus = (typeof CONTRACT_UPDATE_STATUSES)[keyof typeof CONTRACT_UPDATE_STATUSES];
+export type DiffType = (typeof DIFF_TYPES)[keyof typeof DIFF_TYPES];
+export type FileMode = (typeof FILE_MODES)[keyof typeof FILE_MODES];
+export type MatchStatus = (typeof MATCH_STATUSES)[keyof typeof MATCH_STATUSES];

@@ -1,12 +1,19 @@
 // POST /api/reconciliation/upload — Upload and stage a distributor claim file.
 // See docs/RECONCILIATION_DESIGN.md Section 4.2 Step 1.
+//
+// When no column mapping is configured for the distributor, the endpoint
+// detects file headers and returns them so the client can show an inline
+// mapping configuration flow (instead of forcing the user to leave the page).
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth/session';
 import { canEdit } from '@/lib/auth/roles';
 import { stageClaimFile } from '@/lib/reconciliation/staging.service';
+import { getColumnMappingAsync } from '@/lib/reconciliation/column-mappings.server';
+import { STANDARD_FIELD_LABELS, suggestMappings } from '@/lib/reconciliation/mapping-utils';
 import { prisma } from '@/lib/db/client';
 import { endOfMonth, startOfMonth, parse as parseDate } from 'date-fns';
+import * as XLSX from 'xlsx';
 
 export async function POST(request: NextRequest) {
   // Auth check
@@ -54,14 +61,63 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Distributor not found' }, { status: 404 });
   }
 
+  // Read file buffer
+  const arrayBuffer = await file.arrayBuffer();
+  const fileBuffer = Buffer.from(arrayBuffer);
+
+  // Check if column mapping exists — if not, return detected headers for inline configuration
+  const mapping = await getColumnMappingAsync(distributor.code);
+  if (!mapping) {
+    try {
+      const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) {
+        return NextResponse.json({ error: 'File contains no sheets' }, { status: 400 });
+      }
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(worksheet, {
+        defval: null,
+        raw: false,
+      });
+      if (rows.length === 0) {
+        return NextResponse.json({ error: 'File contains no data rows' }, { status: 400 });
+      }
+
+      const headers = Object.keys(rows[0]);
+      const suggested = suggestMappings(headers);
+      const sampleData: Record<string, string[]> = {};
+      for (const header of headers) {
+        sampleData[header] = rows
+          .slice(0, 3)
+          .map((row) => {
+            const val = row[header];
+            return val != null ? String(val).substring(0, 50) : '';
+          })
+          .filter(Boolean);
+      }
+
+      return NextResponse.json({
+        needsMapping: true,
+        distributorId: distributor.id,
+        distributorCode: distributor.code,
+        distributorName: distributor.name,
+        headers,
+        suggestedMappings: suggested,
+        sampleData,
+        standardFields: STANDARD_FIELD_LABELS,
+        totalRows: rows.length,
+      });
+    } catch {
+      return NextResponse.json({
+        error: `No column mapping configured for distributor "${distributor.code}" and the file could not be parsed for header detection.`,
+      }, { status: 422 });
+    }
+  }
+
   // Parse claim period into start/end dates
   const periodDate = parseDate(claimPeriod, 'yyyy-MM', new Date());
   const claimPeriodStart = startOfMonth(periodDate);
   const claimPeriodEnd = endOfMonth(periodDate);
-
-  // Read file buffer
-  const arrayBuffer = await file.arrayBuffer();
-  const fileBuffer = Buffer.from(arrayBuffer);
 
   // Stage the claim file
   const result = await stageClaimFile({

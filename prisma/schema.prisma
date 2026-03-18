@@ -70,10 +70,14 @@ model Contract {
   distributorId    Int          @map("distributor_id")
   endUserId        Int          @map("end_user_id")
   contractNumber   String       @map("contract_number") @db.VarChar(100)
+  customerNumber   String?      @map("customer_number") @db.VarChar(100) // Distributor location/branch account number
   description      String?      @db.VarChar(500)
+  contractType     String       @default("fixed_term") @map("contract_type") @db.VarChar(20) // fixed_term, evergreen
   startDate        DateTime?    @map("start_date") @db.Date
   endDate          DateTime?    @map("end_date") @db.Date
-  status           String       @default("active") @db.VarChar(20) // active, expired, cancelled
+  noticePeriodDays Int?         @map("notice_period_days") // Termination notice period for evergreen contracts
+  status           String       @default("pending_review") @db.VarChar(20) // pending_review, active, expired, cancelled
+  lastReviewedAt   DateTime?    @map("last_reviewed_at") // Manual or auto-updated on contract update commit
   externalErpId    String?      @map("external_erp_id") @db.VarChar(100)
   createdAt        DateTime     @default(now()) @map("created_at")
   updatedAt        DateTime     @updatedAt @map("updated_at")
@@ -81,6 +85,7 @@ model Contract {
   distributor      Distributor  @relation(fields: [distributorId], references: [id])
   endUser          EndUser      @relation(fields: [endUserId], references: [id])
   rebatePlans      RebatePlan[]
+  updateRuns       ContractUpdateRun[]
 
   @@unique([distributorId, endUserId, contractNumber])
   @@index([distributorId])
@@ -259,6 +264,9 @@ model User {
   claimBatches          ClaimBatch[]
   posBatches            PosBatch[]            @relation("PosUploadedBy")
   resolvedIssues        ReconciliationIssue[] @relation("IssueResolvedBy")
+  contractUpdateRuns    ContractUpdateRun[]    @relation("UpdateRunUploadedBy")
+  committedUpdateRuns   ContractUpdateRun[]    @relation("UpdateRunCommittedBy")
+  resolvedDiffs         ContractUpdateDiff[]  @relation("DiffResolvedBy")
 
   @@map("users")
 }
@@ -478,4 +486,75 @@ model DistributorColumnMapping {
 
   @@unique([distributorId, fileType])
   @@map("distributor_column_mappings")
+}
+
+// ---------------------------------------------------------------------------
+// CONTRACT UPDATE RUNS
+// ---------------------------------------------------------------------------
+// A contract update session: user uploads a file to update an existing contract.
+// Analogous to ReconciliationRun but for contract modifications.
+model ContractUpdateRun {
+  id                Int       @id @default(autoincrement())
+  contractId        Int       @map("contract_id")
+  fileMode          String    @map("file_mode") @db.VarChar(20) // snapshot, delta
+  fileName          String    @map("file_name") @db.VarChar(500)
+  fileHash          String?   @map("file_hash") @db.VarChar(128)
+  // Run-level effective date: user can set a single effective date for all changes
+  effectiveDate     DateTime? @map("effective_date") @db.Date
+  status            String    @default("staged") @db.VarChar(20) // staged, review, committed, cancelled
+  totalRows         Int       @default(0) @map("total_rows")
+  unchangedCount    Int       @default(0) @map("unchanged_count")
+  changedCount      Int       @default(0) @map("changed_count")
+  addedCount        Int       @default(0) @map("added_count")
+  removedCount      Int       @default(0) @map("removed_count")
+  commitSummary     Json?     @map("commit_summary") @db.JsonB
+  runById           Int       @map("run_by_id")
+  committedById     Int?      @map("committed_by_id") // User who committed (may differ from uploader)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  committedAt       DateTime? @map("committed_at")
+
+  contract          Contract  @relation(fields: [contractId], references: [id])
+  runBy             User      @relation("UpdateRunUploadedBy", fields: [runById], references: [id])
+  committedBy       User?     @relation("UpdateRunCommittedBy", fields: [committedById], references: [id])
+  diffs             ContractUpdateDiff[]
+
+  @@index([contractId])
+  @@index([status])
+  @@map("contract_update_runs")
+}
+
+// ---------------------------------------------------------------------------
+// CONTRACT UPDATE DIFFS
+// ---------------------------------------------------------------------------
+// Individual diff rows — only actionable changes stored (not unchanged rows).
+model ContractUpdateDiff {
+  id                    Int       @id @default(autoincrement())
+  runId                 Int       @map("run_id")
+  diffType              String    @map("diff_type") @db.VarChar(20) // changed, added, removed
+  // Item identity — normalized to itemId where possible
+  itemId                Int?      @map("item_id")
+  itemNumber            String    @map("item_number") @db.VarChar(100)
+  // Plan matching
+  rebatePlanId          Int?      @map("rebate_plan_id")
+  planCode              String?   @map("plan_code") @db.VarChar(100)
+  matchedRecordId       Int?      @map("matched_record_id")
+  // What changed (for 'changed' diffs)
+  oldPrice              Decimal?  @map("old_price") @db.Decimal(12, 4)
+  newPrice              Decimal?  @map("new_price") @db.Decimal(12, 4)
+  // Match confidence
+  matchStatus           String    @default("auto") @map("match_status") @db.VarChar(20) // auto, ambiguous, manual
+  ambiguityReason       String?   @map("ambiguity_reason") @db.VarChar(255)
+  // Resolution (user decision — Phase C)
+  resolution            String?   @db.VarChar(20) // apply, skip, modify
+  resolutionData        Json?     @map("resolution_data") @db.JsonB
+  resolvedById          Int?      @map("resolved_by_id")
+  resolvedAt            DateTime? @map("resolved_at")
+  // Commit result
+  committedRecordId     Int?      @map("committed_record_id")
+
+  run                   ContractUpdateRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  resolvedBy            User?             @relation("DiffResolvedBy", fields: [resolvedById], references: [id])
+
+  @@index([runId])
+  @@map("contract_update_diffs")
 }

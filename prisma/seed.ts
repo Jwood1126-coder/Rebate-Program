@@ -318,10 +318,598 @@ async function main() {
     });
   }
 
+  // ==========================================================================
+  // EXPANDED SEED DATA
+  // ==========================================================================
+
+  // --- Additional End Users ---
+  const volvo = await prisma.endUser.upsert({
+    where: { code: "VOLVO" },
+    update: {},
+    create: { code: "VOLVO", name: "Volvo Construction Equipment" },
+  });
+
+  const caseEU = await prisma.endUser.upsert({
+    where: { code: "CASE" },
+    update: {},
+    create: { code: "CASE", name: "Case Construction" },
+  });
+
+  const kubota = await prisma.endUser.upsert({
+    where: { code: "KUBOTA" },
+    update: {},
+    create: { code: "KUBOTA", name: "Kubota" },
+  });
+
+  const terex = await prisma.endUser.upsert({
+    where: { code: "TEREX" },
+    update: {},
+    create: { code: "TEREX", name: "Terex Corporation" },
+  });
+
+  // --- Contracts for HSC, AIT, LGG, TIPCO ---
+  // HSC / Volvo (active)
+  const contractHSC1 = await prisma.contract.upsert({
+    where: { distributorId_endUserId_contractNumber: { distributorId: hsc.id, endUserId: volvo.id, contractNumber: "103200" } },
+    update: {},
+    create: {
+      distributorId: hsc.id, endUserId: volvo.id, contractNumber: "103200",
+      description: "HSC / Volvo hydraulic fittings program",
+      startDate: new Date("2024-07-01"), endDate: new Date("2027-06-30"), status: "active",
+    },
+  });
+
+  // HSC / Case (expired)
+  const contractHSC2 = await prisma.contract.upsert({
+    where: { distributorId_endUserId_contractNumber: { distributorId: hsc.id, endUserId: caseEU.id, contractNumber: "103210" } },
+    update: {},
+    create: {
+      distributorId: hsc.id, endUserId: caseEU.id, contractNumber: "103210",
+      description: "HSC / Case adapters & couplings",
+      startDate: new Date("2023-01-01"), endDate: new Date("2025-06-30"), status: "expired",
+    },
+  });
+
+  // AIT / Kubota (active)
+  const contractAIT1 = await prisma.contract.upsert({
+    where: { distributorId_endUserId_contractNumber: { distributorId: ait.id, endUserId: kubota.id, contractNumber: "103500" } },
+    update: {},
+    create: {
+      distributorId: ait.id, endUserId: kubota.id, contractNumber: "103500",
+      description: "AIT / Kubota stainless steel program",
+      startDate: new Date("2025-01-01"), endDate: new Date("2027-12-31"), status: "active",
+    },
+  });
+
+  // AIT / Terex (active)
+  const contractAIT2 = await prisma.contract.upsert({
+    where: { distributorId_endUserId_contractNumber: { distributorId: ait.id, endUserId: terex.id, contractNumber: "103510" } },
+    update: {},
+    create: {
+      distributorId: ait.id, endUserId: terex.id, contractNumber: "103510",
+      description: "AIT / Terex hydraulic fittings",
+      startDate: new Date("2024-06-01"), endDate: new Date("2026-05-31"), status: "active",
+    },
+  });
+
+  // LGG / Deere (active)
+  const contractLGG1 = await prisma.contract.upsert({
+    where: { distributorId_endUserId_contractNumber: { distributorId: lgg.id, endUserId: deere.id, contractNumber: "104100" } },
+    update: {},
+    create: {
+      distributorId: lgg.id, endUserId: deere.id, contractNumber: "104100",
+      description: "LGG / John Deere coupling & adapter program",
+      startDate: new Date("2025-03-01"), endDate: new Date("2028-02-28"), status: "active",
+    },
+  });
+
+  // LGG / Cat (expired)
+  const contractLGG2 = await prisma.contract.upsert({
+    where: { distributorId_endUserId_contractNumber: { distributorId: lgg.id, endUserId: cat.id, contractNumber: "104110" } },
+    update: {},
+    create: {
+      distributorId: lgg.id, endUserId: cat.id, contractNumber: "104110",
+      description: "LGG / Caterpillar legacy fittings",
+      startDate: new Date("2022-01-01"), endDate: new Date("2024-12-31"), status: "expired",
+    },
+  });
+
+  // TIPCO / Volvo (active)
+  const contractTIPCO1 = await prisma.contract.upsert({
+    where: { distributorId_endUserId_contractNumber: { distributorId: tipco.id, endUserId: volvo.id, contractNumber: "104500" } },
+    update: {},
+    create: {
+      distributorId: tipco.id, endUserId: volvo.id, contractNumber: "104500",
+      description: "TIPCO / Volvo high-pressure fittings",
+      startDate: new Date("2025-01-01"), endDate: new Date("2027-12-31"), status: "active",
+    },
+  });
+
+  // TIPCO / Komatsu (active)
+  const contractTIPCO2 = await prisma.contract.upsert({
+    where: { distributorId_endUserId_contractNumber: { distributorId: tipco.id, endUserId: komatsu.id, contractNumber: "104510" } },
+    update: {},
+    create: {
+      distributorId: tipco.id, endUserId: komatsu.id, contractNumber: "104510",
+      description: "TIPCO / Komatsu OEM replacement program",
+      startDate: new Date("2024-04-01"), endDate: new Date("2026-03-31"), status: "active",
+    },
+  });
+
+  // --- Rebate Plans for new contracts ---
+  const planHSC_HYD = await prisma.rebatePlan.upsert({
+    where: { contractId_planCode: { contractId: contractHSC1.id, planCode: "HYD" } },
+    update: {},
+    create: { contractId: contractHSC1.id, planCode: "HYD", planName: "Hydraulic Fittings", discountType: "part", status: "active" },
+  });
+
+  const planHSC_ADP = await prisma.rebatePlan.upsert({
+    where: { contractId_planCode: { contractId: contractHSC2.id, planCode: "ADP" } },
+    update: {},
+    create: { contractId: contractHSC2.id, planCode: "ADP", planName: "Adapters & Couplings", discountType: "product_code", status: "expired" },
+  });
+
+  const planAIT_SS = await prisma.rebatePlan.upsert({
+    where: { contractId_planCode: { contractId: contractAIT1.id, planCode: "SS" } },
+    update: {},
+    create: { contractId: contractAIT1.id, planCode: "SS", planName: "Stainless Steel Program", discountType: "part", status: "active" },
+  });
+
+  const planAIT_HYD = await prisma.rebatePlan.upsert({
+    where: { contractId_planCode: { contractId: contractAIT2.id, planCode: "HYD" } },
+    update: {},
+    create: { contractId: contractAIT2.id, planCode: "HYD", planName: "Hydraulic Fittings", discountType: "part", status: "active" },
+  });
+
+  const planLGG_CPL = await prisma.rebatePlan.upsert({
+    where: { contractId_planCode: { contractId: contractLGG1.id, planCode: "CPL" } },
+    update: {},
+    create: { contractId: contractLGG1.id, planCode: "CPL", planName: "Couplings & Adapters", discountType: "part", status: "active" },
+  });
+
+  const planLGG_FIT = await prisma.rebatePlan.upsert({
+    where: { contractId_planCode: { contractId: contractLGG2.id, planCode: "FIT" } },
+    update: {},
+    create: { contractId: contractLGG2.id, planCode: "FIT", planName: "General Fittings", discountType: "product_code", status: "expired" },
+  });
+
+  const planTIPCO_HP = await prisma.rebatePlan.upsert({
+    where: { contractId_planCode: { contractId: contractTIPCO1.id, planCode: "HP" } },
+    update: {},
+    create: { contractId: contractTIPCO1.id, planCode: "HP", planName: "High-Pressure Fittings", discountType: "part", status: "active" },
+  });
+
+  const planTIPCO_OEM = await prisma.rebatePlan.upsert({
+    where: { contractId_planCode: { contractId: contractTIPCO2.id, planCode: "OEM" } },
+    update: {},
+    create: { contractId: contractTIPCO2.id, planCode: "OEM", planName: "OEM Replacement Parts", discountType: "product_code", status: "active" },
+  });
+
+  // --- Additional Items (~20 new) ---
+  const newItems = await Promise.all([
+    prisma.item.upsert({ where: { itemNumber: "6800-08-08" }, update: {}, create: { itemNumber: "6800-08-08", description: "1/2\" Male ORB x 1/2\" Male ORB Straight", productCode: "HYD" } }),
+    prisma.item.upsert({ where: { itemNumber: "6800-12-12" }, update: {}, create: { itemNumber: "6800-12-12", description: "3/4\" Male ORB x 3/4\" Male ORB Straight", productCode: "HYD" } }),
+    prisma.item.upsert({ where: { itemNumber: "6800-16-16" }, update: {}, create: { itemNumber: "6800-16-16", description: "1\" Male ORB x 1\" Male ORB Straight", productCode: "HYD" } }),
+    prisma.item.upsert({ where: { itemNumber: "6800-20-20" }, update: {}, create: { itemNumber: "6800-20-20", description: "1-1/4\" Male ORB x 1-1/4\" Male ORB Straight", productCode: "HYD" } }),
+    prisma.item.upsert({ where: { itemNumber: "4400-08-08" }, update: {}, create: { itemNumber: "4400-08-08", description: "1/2\" Female JIC x 1/2\" Female JIC Coupling", productCode: "CPL" } }),
+    prisma.item.upsert({ where: { itemNumber: "4400-12-12" }, update: {}, create: { itemNumber: "4400-12-12", description: "3/4\" Female JIC x 3/4\" Female JIC Coupling", productCode: "CPL" } }),
+    prisma.item.upsert({ where: { itemNumber: "4400-16-16" }, update: {}, create: { itemNumber: "4400-16-16", description: "1\" Female JIC x 1\" Female JIC Coupling", productCode: "CPL" } }),
+    prisma.item.upsert({ where: { itemNumber: "4404-08-08" }, update: {}, create: { itemNumber: "4404-08-08", description: "1/2\" Female JIC 90 Elbow Coupling", productCode: "CPL" } }),
+    prisma.item.upsert({ where: { itemNumber: "4404-12-12" }, update: {}, create: { itemNumber: "4404-12-12", description: "3/4\" Female JIC 90 Elbow Coupling", productCode: "CPL" } }),
+    prisma.item.upsert({ where: { itemNumber: "SS-6800-08-08" }, update: {}, create: { itemNumber: "SS-6800-08-08", description: "SS 1/2\" Male ORB Straight Adapter", productCode: "SS" } }),
+    prisma.item.upsert({ where: { itemNumber: "SS-6800-12-12" }, update: {}, create: { itemNumber: "SS-6800-12-12", description: "SS 3/4\" Male ORB Straight Adapter", productCode: "SS" } }),
+    prisma.item.upsert({ where: { itemNumber: "SS-6801-08-08" }, update: {}, create: { itemNumber: "SS-6801-08-08", description: "SS 1/2\" Male ORB 90 Elbow", productCode: "SS" } }),
+    prisma.item.upsert({ where: { itemNumber: "SS-6801-12-12" }, update: {}, create: { itemNumber: "SS-6801-12-12", description: "SS 3/4\" Male ORB 90 Elbow", productCode: "SS" } }),
+    prisma.item.upsert({ where: { itemNumber: "SS-4400-08-08" }, update: {}, create: { itemNumber: "SS-4400-08-08", description: "SS 1/2\" Female JIC Coupling", productCode: "SS" } }),
+    prisma.item.upsert({ where: { itemNumber: "7000-08-08" }, update: {}, create: { itemNumber: "7000-08-08", description: "1/2\" Code 61 Flange Straight", productCode: "HP" } }),
+    prisma.item.upsert({ where: { itemNumber: "7000-12-12" }, update: {}, create: { itemNumber: "7000-12-12", description: "3/4\" Code 61 Flange Straight", productCode: "HP" } }),
+    prisma.item.upsert({ where: { itemNumber: "7000-16-16" }, update: {}, create: { itemNumber: "7000-16-16", description: "1\" Code 61 Flange Straight", productCode: "HP" } }),
+    prisma.item.upsert({ where: { itemNumber: "7001-12-12" }, update: {}, create: { itemNumber: "7001-12-12", description: "3/4\" Code 61 Flange 90 Elbow", productCode: "HP" } }),
+    prisma.item.upsert({ where: { itemNumber: "7001-16-16" }, update: {}, create: { itemNumber: "7001-16-16", description: "1\" Code 61 Flange 90 Elbow", productCode: "HP" } }),
+    prisma.item.upsert({ where: { itemNumber: "7002-20-20" }, update: {}, create: { itemNumber: "7002-20-20", description: "1-1/4\" Code 62 Flange Tee", productCode: "HP" } }),
+  ]);
+
+  // --- New Rebate Records with status variety ---
+  // Helper: newItems indices map to items above (0=6800-08-08, 1=6800-12-12, etc.)
+
+  // ---- HSC / Volvo (planHSC_HYD) - Active records ----
+  const hscHydRecords = [
+    { planId: planHSC_HYD.id, itemId: newItems[0].id, price: 3.25, start: "2024-07-01", end: "2027-06-30", status: "active" },
+    { planId: planHSC_HYD.id, itemId: newItems[1].id, price: 4.80, start: "2024-07-01", end: "2027-06-30", status: "active" },
+    { planId: planHSC_HYD.id, itemId: newItems[2].id, price: 6.10, start: "2024-07-01", end: "2027-06-30", status: "active" },
+    { planId: planHSC_HYD.id, itemId: newItems[3].id, price: 8.45, start: "2024-07-01", end: "2027-06-30", status: "active" },
+    { planId: planHSC_HYD.id, itemId: items[3].id, price: 1.35, start: "2024-07-01", end: "2027-06-30", status: "active" },   // 1100-C-12
+    { planId: planHSC_HYD.id, itemId: items[4].id, price: 1.65, start: "2024-07-01", end: "2027-06-30", status: "active" },   // 1100-D-16
+  ];
+
+  // ---- HSC / Case (planHSC_ADP) - Expired records ----
+  const hscAdpRecords = [
+    { planId: planHSC_ADP.id, itemId: newItems[4].id, price: 5.50, start: "2023-01-01", end: "2025-06-30", status: "expired" },
+    { planId: planHSC_ADP.id, itemId: newItems[5].id, price: 7.20, start: "2023-01-01", end: "2025-06-30", status: "expired" },
+    { planId: planHSC_ADP.id, itemId: newItems[6].id, price: 9.80, start: "2023-01-01", end: "2025-06-30", status: "expired" },
+    { planId: planHSC_ADP.id, itemId: newItems[7].id, price: 6.90, start: "2023-01-01", end: "2025-06-30", status: "expired" },
+    { planId: planHSC_ADP.id, itemId: newItems[8].id, price: 8.75, start: "2023-01-01", end: "2025-06-30", status: "expired" },
+  ];
+
+  // ---- AIT / Kubota (planAIT_SS) - Active + Draft + Future records ----
+  const aitSsRecords = [
+    { planId: planAIT_SS.id, itemId: newItems[9].id, price: 8.50, start: "2025-01-01", end: "2027-12-31", status: "active" },
+    { planId: planAIT_SS.id, itemId: newItems[10].id, price: 12.40, start: "2025-01-01", end: "2027-12-31", status: "active" },
+    { planId: planAIT_SS.id, itemId: newItems[11].id, price: 10.20, start: "2025-01-01", end: "2027-12-31", status: "active" },
+    { planId: planAIT_SS.id, itemId: newItems[12].id, price: 14.80, start: "2025-01-01", end: "2027-12-31", status: "active" },
+    { planId: planAIT_SS.id, itemId: newItems[13].id, price: 11.90, start: "2025-01-01", end: "2027-12-31", status: "active" },
+    // Draft records (not yet finalized)
+    { planId: planAIT_SS.id, itemId: newItems[0].id, price: 7.75, start: "2025-06-01", end: "2027-12-31", status: "draft" },
+    { planId: planAIT_SS.id, itemId: newItems[1].id, price: 10.50, start: "2025-06-01", end: "2027-12-31", status: "draft" },
+    // Future records (start in 2027)
+    { planId: planAIT_SS.id, itemId: newItems[9].id, price: 9.25, start: "2027-01-01", end: "2028-12-31", status: "future" },
+    { planId: planAIT_SS.id, itemId: newItems[10].id, price: 13.50, start: "2027-01-01", end: "2028-12-31", status: "future" },
+  ];
+
+  // ---- AIT / Terex (planAIT_HYD) - Active + Cancelled ----
+  const aitHydRecords = [
+    { planId: planAIT_HYD.id, itemId: newItems[0].id, price: 3.40, start: "2024-06-01", end: "2026-05-31", status: "active" },
+    { planId: planAIT_HYD.id, itemId: newItems[1].id, price: 5.10, start: "2024-06-01", end: "2026-05-31", status: "active" },
+    { planId: planAIT_HYD.id, itemId: newItems[2].id, price: 6.55, start: "2024-06-01", end: "2026-05-31", status: "active" },
+    { planId: planAIT_HYD.id, itemId: newItems[3].id, price: 8.90, start: "2024-06-01", end: "2026-05-31", status: "active" },
+    { planId: planAIT_HYD.id, itemId: items[34].id, price: 4.10, start: "2024-06-01", end: "2026-05-31", status: "active" },   // 6801-08-08-NWO-FG
+    // Cancelled records
+    { planId: planAIT_HYD.id, itemId: items[35].id, price: 5.80, start: "2024-06-01", end: "2026-05-31", status: "cancelled" },
+    { planId: planAIT_HYD.id, itemId: items[36].id, price: 7.00, start: "2024-06-01", end: "2026-05-31", status: "cancelled" },
+  ];
+
+  // ---- LGG / Deere (planLGG_CPL) - Active + Open-ended + Future ----
+  const lggCplRecords = [
+    { planId: planLGG_CPL.id, itemId: newItems[4].id, price: 5.80, start: "2025-03-01", end: "2028-02-28", status: "active" },
+    { planId: planLGG_CPL.id, itemId: newItems[5].id, price: 7.60, start: "2025-03-01", end: "2028-02-28", status: "active" },
+    { planId: planLGG_CPL.id, itemId: newItems[6].id, price: 10.25, start: "2025-03-01", end: "2028-02-28", status: "active" },
+    { planId: planLGG_CPL.id, itemId: newItems[7].id, price: 7.15, start: "2025-03-01", end: "2028-02-28", status: "active" },
+    { planId: planLGG_CPL.id, itemId: newItems[8].id, price: 9.30, start: "2025-03-01", end: "2028-02-28", status: "active" },
+    // Open-ended records (no end date)
+    { planId: planLGG_CPL.id, itemId: newItems[0].id, price: 3.50, start: "2025-03-01", end: null, status: "active" },
+    { planId: planLGG_CPL.id, itemId: newItems[1].id, price: 5.20, start: "2025-03-01", end: null, status: "active" },
+    // Future records
+    { planId: planLGG_CPL.id, itemId: newItems[4].id, price: 6.20, start: "2027-03-01", end: "2029-02-28", status: "future" },
+    { planId: planLGG_CPL.id, itemId: newItems[5].id, price: 8.10, start: "2027-03-01", end: "2029-02-28", status: "future" },
+  ];
+
+  // ---- LGG / Cat (planLGG_FIT) - Expired ----
+  const lggFitRecords = [
+    { planId: planLGG_FIT.id, itemId: items[3].id, price: 1.10, start: "2022-01-01", end: "2024-12-31", status: "expired" },
+    { planId: planLGG_FIT.id, itemId: items[4].id, price: 1.40, start: "2022-01-01", end: "2024-12-31", status: "expired" },
+    { planId: planLGG_FIT.id, itemId: items[6].id, price: 0.90, start: "2022-01-01", end: "2024-12-31", status: "expired" },
+    { planId: planLGG_FIT.id, itemId: items[7].id, price: 0.55, start: "2022-01-01", end: "2024-12-31", status: "expired" },
+  ];
+
+  // ---- TIPCO / Volvo (planTIPCO_HP) - Active + Draft ----
+  const tipcoHpRecords = [
+    { planId: planTIPCO_HP.id, itemId: newItems[14].id, price: 15.50, start: "2025-01-01", end: "2027-12-31", status: "active" },
+    { planId: planTIPCO_HP.id, itemId: newItems[15].id, price: 22.40, start: "2025-01-01", end: "2027-12-31", status: "active" },
+    { planId: planTIPCO_HP.id, itemId: newItems[16].id, price: 28.75, start: "2025-01-01", end: "2027-12-31", status: "active" },
+    { planId: planTIPCO_HP.id, itemId: newItems[17].id, price: 26.30, start: "2025-01-01", end: "2027-12-31", status: "active" },
+    { planId: planTIPCO_HP.id, itemId: newItems[18].id, price: 31.50, start: "2025-01-01", end: "2027-12-31", status: "active" },
+    { planId: planTIPCO_HP.id, itemId: newItems[19].id, price: 45.80, start: "2025-01-01", end: "2027-12-31", status: "active" },
+    // Drafts pending approval
+    { planId: planTIPCO_HP.id, itemId: newItems[0].id, price: 3.90, start: "2026-01-01", end: "2027-12-31", status: "draft" },
+    { planId: planTIPCO_HP.id, itemId: newItems[1].id, price: 5.60, start: "2026-01-01", end: "2027-12-31", status: "draft" },
+    { planId: planTIPCO_HP.id, itemId: newItems[2].id, price: 7.30, start: "2026-01-01", end: "2027-12-31", status: "draft" },
+  ];
+
+  // ---- TIPCO / Komatsu (planTIPCO_OEM) - Active + Cancelled + Open-ended ----
+  const tipcoOemRecords = [
+    { planId: planTIPCO_OEM.id, itemId: items[37].id, price: 3.15, start: "2024-04-01", end: "2026-03-31", status: "active" },
+    { planId: planTIPCO_OEM.id, itemId: items[38].id, price: 4.50, start: "2024-04-01", end: "2026-03-31", status: "active" },
+    { planId: planTIPCO_OEM.id, itemId: items[39].id, price: 6.10, start: "2024-04-01", end: "2026-03-31", status: "active" },
+    { planId: planTIPCO_OEM.id, itemId: items[40].id, price: 7.40, start: "2024-04-01", end: "2026-03-31", status: "active" },
+    { planId: planTIPCO_OEM.id, itemId: items[41].id, price: 9.90, start: "2024-04-01", end: "2026-03-31", status: "active" },
+    // Cancelled
+    { planId: planTIPCO_OEM.id, itemId: newItems[0].id, price: 3.60, start: "2024-04-01", end: "2026-03-31", status: "cancelled" },
+    // Open-ended
+    { planId: planTIPCO_OEM.id, itemId: newItems[2].id, price: 6.80, start: "2024-04-01", end: null, status: "active" },
+    { planId: planTIPCO_OEM.id, itemId: newItems[3].id, price: 9.20, start: "2024-04-01", end: null, status: "active" },
+  ];
+
+  // ---- Additional FAS records: Future + Cancelled ----
+  const fasExtraRecords = [
+    // Future pricing for FAS/HYD plan
+    { planId: planHYD.id, itemId: items[3].id, price: 1.35, start: "2027-03-01", end: "2028-02-28", status: "future" },
+    // Cancelled FAS/OSW records
+    { planId: planOSW.id, itemId: items[6].id, price: 0.85, start: "2024-01-01", end: "2026-12-31", status: "cancelled" },
+  ];
+
+  // ---- Additional Motion records: Draft + Future ----
+  const motionExtraRecords = [
+    // Draft for Motion/BRG
+    { planId: planBRG.id, itemId: items[5].id, price: 0.72, start: "2026-01-01", end: "2027-12-31", status: "draft" },
+    // Future for Motion/MHF
+    { planId: planMHF.id, itemId: newItems[0].id, price: 3.95, start: "2027-06-01", end: "2029-05-31", status: "future" },
+    { planId: planMHF.id, itemId: newItems[1].id, price: 5.40, start: "2027-06-01", end: "2029-05-31", status: "future" },
+  ];
+
+  // Insert all new records
+  const allNewRecords = [
+    ...hscHydRecords, ...hscAdpRecords, ...aitSsRecords, ...aitHydRecords,
+    ...lggCplRecords, ...lggFitRecords, ...tipcoHpRecords, ...tipcoOemRecords,
+    ...fasExtraRecords, ...motionExtraRecords,
+  ];
+
+  const createdRecordIds: number[] = [];
+  for (const r of allNewRecords) {
+    const record = await prisma.rebateRecord.upsert({
+      where: { rebatePlanId_itemId_startDate: { rebatePlanId: r.planId, itemId: r.itemId, startDate: new Date(r.start) } },
+      update: {},
+      create: {
+        rebatePlanId: r.planId,
+        itemId: r.itemId,
+        rebatePrice: r.price,
+        startDate: new Date(r.start),
+        endDate: r.end ? new Date(r.end) : null,
+        status: r.status,
+        createdById: manager.id,
+        updatedById: manager.id,
+      },
+    });
+    createdRecordIds.push(record.id);
+  }
+
+  // --- Superseded Records ---
+  // Create old records that are superseded by newer ones.
+  // Pattern: old record (expired/end-dated) -> new record (active) with supersededById link.
+
+  // Supersession 1: HSC/HYD 6800-08-08 — old price $2.90, superseded by current $3.25
+  const supersededRec1 = await prisma.rebateRecord.upsert({
+    where: { rebatePlanId_itemId_startDate: { rebatePlanId: planHSC_HYD.id, itemId: newItems[0].id, startDate: new Date("2023-07-01") } },
+    update: {},
+    create: {
+      rebatePlanId: planHSC_HYD.id,
+      itemId: newItems[0].id,
+      rebatePrice: 2.90,
+      startDate: new Date("2023-07-01"),
+      endDate: new Date("2024-06-30"),
+      status: "superseded",
+      createdById: manager.id,
+      updatedById: manager.id,
+    },
+  });
+  // Link: find the active record for same plan+item and set supersededById
+  const activeHsc1 = await prisma.rebateRecord.findUnique({
+    where: { rebatePlanId_itemId_startDate: { rebatePlanId: planHSC_HYD.id, itemId: newItems[0].id, startDate: new Date("2024-07-01") } },
+  });
+  if (activeHsc1) {
+    await prisma.rebateRecord.update({
+      where: { id: supersededRec1.id },
+      data: { supersededById: activeHsc1.id },
+    });
+  }
+
+  // Supersession 2: HSC/HYD 6800-12-12 — old price $4.20, superseded by current $4.80
+  const supersededRec2 = await prisma.rebateRecord.upsert({
+    where: { rebatePlanId_itemId_startDate: { rebatePlanId: planHSC_HYD.id, itemId: newItems[1].id, startDate: new Date("2023-07-01") } },
+    update: {},
+    create: {
+      rebatePlanId: planHSC_HYD.id,
+      itemId: newItems[1].id,
+      rebatePrice: 4.20,
+      startDate: new Date("2023-07-01"),
+      endDate: new Date("2024-06-30"),
+      status: "superseded",
+      createdById: manager.id,
+      updatedById: manager.id,
+    },
+  });
+  const activeHsc2 = await prisma.rebateRecord.findUnique({
+    where: { rebatePlanId_itemId_startDate: { rebatePlanId: planHSC_HYD.id, itemId: newItems[1].id, startDate: new Date("2024-07-01") } },
+  });
+  if (activeHsc2) {
+    await prisma.rebateRecord.update({
+      where: { id: supersededRec2.id },
+      data: { supersededById: activeHsc2.id },
+    });
+  }
+
+  // Supersession 3: TIPCO/HP 7000-08-08 — old price $13.80, superseded by current $15.50
+  const supersededRec3 = await prisma.rebateRecord.upsert({
+    where: { rebatePlanId_itemId_startDate: { rebatePlanId: planTIPCO_HP.id, itemId: newItems[14].id, startDate: new Date("2024-01-01") } },
+    update: {},
+    create: {
+      rebatePlanId: planTIPCO_HP.id,
+      itemId: newItems[14].id,
+      rebatePrice: 13.80,
+      startDate: new Date("2024-01-01"),
+      endDate: new Date("2024-12-31"),
+      status: "superseded",
+      createdById: admin.id,
+      updatedById: admin.id,
+    },
+  });
+  const activeTipco1 = await prisma.rebateRecord.findUnique({
+    where: { rebatePlanId_itemId_startDate: { rebatePlanId: planTIPCO_HP.id, itemId: newItems[14].id, startDate: new Date("2025-01-01") } },
+  });
+  if (activeTipco1) {
+    await prisma.rebateRecord.update({
+      where: { id: supersededRec3.id },
+      data: { supersededById: activeTipco1.id },
+    });
+  }
+
+  // Supersession 4: TIPCO/HP 7000-12-12 — old price $19.50, superseded by current $22.40
+  const supersededRec4 = await prisma.rebateRecord.upsert({
+    where: { rebatePlanId_itemId_startDate: { rebatePlanId: planTIPCO_HP.id, itemId: newItems[15].id, startDate: new Date("2024-01-01") } },
+    update: {},
+    create: {
+      rebatePlanId: planTIPCO_HP.id,
+      itemId: newItems[15].id,
+      rebatePrice: 19.50,
+      startDate: new Date("2024-01-01"),
+      endDate: new Date("2024-12-31"),
+      status: "superseded",
+      createdById: admin.id,
+      updatedById: admin.id,
+    },
+  });
+  const activeTipco2 = await prisma.rebateRecord.findUnique({
+    where: { rebatePlanId_itemId_startDate: { rebatePlanId: planTIPCO_HP.id, itemId: newItems[15].id, startDate: new Date("2025-01-01") } },
+  });
+  if (activeTipco2) {
+    await prisma.rebateRecord.update({
+      where: { id: supersededRec4.id },
+      data: { supersededById: activeTipco2.id },
+    });
+  }
+
+  // Supersession 5: AIT/HYD 6800-08-08 — old price $2.85, superseded by current $3.40
+  const supersededRec5 = await prisma.rebateRecord.upsert({
+    where: { rebatePlanId_itemId_startDate: { rebatePlanId: planAIT_HYD.id, itemId: newItems[0].id, startDate: new Date("2023-06-01") } },
+    update: {},
+    create: {
+      rebatePlanId: planAIT_HYD.id,
+      itemId: newItems[0].id,
+      rebatePrice: 2.85,
+      startDate: new Date("2023-06-01"),
+      endDate: new Date("2024-05-31"),
+      status: "superseded",
+      createdById: manager.id,
+      updatedById: manager.id,
+    },
+  });
+  const activeAit1 = await prisma.rebateRecord.findUnique({
+    where: { rebatePlanId_itemId_startDate: { rebatePlanId: planAIT_HYD.id, itemId: newItems[0].id, startDate: new Date("2024-06-01") } },
+  });
+  if (activeAit1) {
+    await prisma.rebateRecord.update({
+      where: { id: supersededRec5.id },
+      data: { supersededById: activeAit1.id },
+    });
+  }
+
+  // --- Record Notes ---
+  // Use createdRecordIds to reference recently created records
+  const noteTargets = [
+    { recordIdx: 0, noteType: "general", text: "Pricing confirmed by Volvo purchasing department via email 2024-06-15." },
+    { recordIdx: 5, noteType: "general", text: "Cross-referenced with HSC contract renewal terms. Price matches PO #HSC-2024-4421." },
+    { recordIdx: 11, noteType: "pricing", text: "SS pricing includes 15% material surcharge per Q1 2025 stainless steel index." },
+    { recordIdx: 14, noteType: "general", text: "Kubota requested review of SS elbow pricing for next contract period." },
+    { recordIdx: 20, noteType: "general", text: "Terex account manager confirmed cancellation — switching to competitor supplier for these items." },
+    { recordIdx: 25, noteType: "pricing", text: "Open-ended record: LGG/Deere agreed to hold pricing until next annual review." },
+    { recordIdx: 30, noteType: "general", text: "TIPCO high-pressure flange pricing based on 2025 catalog less 35% distributor discount." },
+    { recordIdx: 35, noteType: "general", text: "Draft pending VP approval — new HP items added per TIPCO request dated 2025-11-20." },
+    { recordIdx: 40, noteType: "pricing", text: "TIPCO/Komatsu OEM pricing aligned with Komatsu global parts agreement GP-2024-100." },
+    { recordIdx: 45, noteType: "general", text: "Cancelled: Komatsu consolidated these items under direct-ship program effective 2025-Q2." },
+  ];
+
+  for (const n of noteTargets) {
+    if (n.recordIdx < createdRecordIds.length) {
+      await prisma.recordNote.create({
+        data: {
+          rebateRecordId: createdRecordIds[n.recordIdx],
+          noteType: n.noteType,
+          noteText: n.text,
+          createdById: n.recordIdx % 2 === 0 ? admin.id : manager.id,
+        },
+      });
+    }
+  }
+
+  // --- Audit Log Entries ---
+  // Simulate realistic activity: record creates, updates, price changes, cancellations
+  const auditEntries = [
+    {
+      tableName: "rebate_records", recordId: createdRecordIds[0] || 1, action: "INSERT",
+      changedFields: { rebatePrice: { old: null, new: "3.2500" }, status: { old: null, new: "active" } },
+      userId: manager.id, createdAt: new Date("2024-06-20T14:30:00Z"),
+    },
+    {
+      tableName: "rebate_records", recordId: createdRecordIds[1] || 2, action: "INSERT",
+      changedFields: { rebatePrice: { old: null, new: "4.8000" }, status: { old: null, new: "active" } },
+      userId: manager.id, createdAt: new Date("2024-06-20T14:31:00Z"),
+    },
+    {
+      tableName: "contracts", recordId: contractHSC1.id, action: "INSERT",
+      changedFields: { contractNumber: { old: null, new: "103200" }, description: { old: null, new: "HSC / Volvo hydraulic fittings program" } },
+      userId: admin.id, createdAt: new Date("2024-06-15T10:00:00Z"),
+    },
+    {
+      tableName: "rebate_records", recordId: createdRecordIds[11] || 12, action: "INSERT",
+      changedFields: { rebatePrice: { old: null, new: "8.5000" }, status: { old: null, new: "active" } },
+      userId: admin.id, createdAt: new Date("2025-01-05T09:15:00Z"),
+    },
+    {
+      tableName: "rebate_records", recordId: supersededRec1.id, action: "UPDATE",
+      changedFields: { status: { old: "active", new: "superseded" }, endDate: { old: null, new: "2024-06-30" } },
+      userId: manager.id, createdAt: new Date("2024-07-01T08:00:00Z"),
+    },
+    {
+      tableName: "rebate_records", recordId: supersededRec3.id, action: "UPDATE",
+      changedFields: { status: { old: "active", new: "superseded" }, rebatePrice: { old: "13.8000", new: "13.8000" } },
+      userId: admin.id, createdAt: new Date("2025-01-01T00:05:00Z"),
+    },
+    {
+      tableName: "rebate_records", recordId: createdRecordIds[20] || 21, action: "UPDATE",
+      changedFields: { status: { old: "active", new: "cancelled" } },
+      userId: manager.id, createdAt: new Date("2025-02-10T11:45:00Z"),
+    },
+    {
+      tableName: "contracts", recordId: contractAIT2.id, action: "INSERT",
+      changedFields: { contractNumber: { old: null, new: "103510" }, description: { old: null, new: "AIT / Terex hydraulic fittings" } },
+      userId: admin.id, createdAt: new Date("2024-05-20T16:00:00Z"),
+    },
+    {
+      tableName: "rebate_records", recordId: createdRecordIds[30] || 31, action: "INSERT",
+      changedFields: { rebatePrice: { old: null, new: "15.5000" }, status: { old: null, new: "active" } },
+      userId: admin.id, createdAt: new Date("2025-01-02T10:30:00Z"),
+    },
+    {
+      tableName: "rebate_records", recordId: createdRecordIds[35] || 36, action: "INSERT",
+      changedFields: { rebatePrice: { old: null, new: "3.9000" }, status: { old: null, new: "draft" } },
+      userId: manager.id, createdAt: new Date("2025-11-25T13:20:00Z"),
+    },
+    {
+      tableName: "contracts", recordId: contractLGG1.id, action: "INSERT",
+      changedFields: { contractNumber: { old: null, new: "104100" }, description: { old: null, new: "LGG / John Deere coupling & adapter program" } },
+      userId: admin.id, createdAt: new Date("2025-02-15T09:00:00Z"),
+    },
+    {
+      tableName: "rebate_records", recordId: createdRecordIds[25] || 26, action: "UPDATE",
+      changedFields: { endDate: { old: "2026-02-28", new: null }, noteText: "Changed to open-ended per LGG agreement" },
+      userId: manager.id, createdAt: new Date("2025-04-10T15:30:00Z"),
+    },
+    {
+      tableName: "items", recordId: newItems[14].id, action: "INSERT",
+      changedFields: { itemNumber: { old: null, new: "7000-08-08" }, description: { old: null, new: "1/2\" Code 61 Flange Straight" } },
+      userId: admin.id, createdAt: new Date("2024-12-20T11:00:00Z"),
+    },
+    {
+      tableName: "rebate_records", recordId: createdRecordIds[45] || 46, action: "UPDATE",
+      changedFields: { status: { old: "active", new: "cancelled" }, reason: "Komatsu consolidated under direct-ship program" },
+      userId: admin.id, createdAt: new Date("2025-03-15T14:00:00Z"),
+    },
+    {
+      tableName: "contracts", recordId: contractTIPCO1.id, action: "UPDATE",
+      changedFields: { endDate: { old: "2026-12-31", new: "2027-12-31" }, description: { old: "TIPCO / Volvo fittings", new: "TIPCO / Volvo high-pressure fittings" } },
+      userId: admin.id, createdAt: new Date("2025-01-10T09:45:00Z"),
+    },
+  ];
+
+  for (const entry of auditEntries) {
+    await prisma.auditLog.create({
+      data: {
+        tableName: entry.tableName,
+        recordId: entry.recordId,
+        action: entry.action,
+        changedFields: entry.changedFields,
+        userId: entry.userId,
+        createdAt: entry.createdAt,
+      },
+    });
+  }
+
   console.log("Seed complete.");
   console.log("  Users: admin/admin123, jwood/manager123, viewer/viewer123");
   console.log("  Distributors: FAS, MOTION, HSC, AIT, LGG, TIPCO");
-  console.log(`  Contracts: 3 | Plans: 3 | Items: ${items.length} | Records: ${recordData.length}`);
+  console.log("  End Users: LINK-BELT, CAT, DEERE, KOMATSU, VOLVO, CASE, KUBOTA, TEREX");
+  console.log(`  Contracts: 12 | Plans: 12 | Items: ${items.length + newItems.length}`);
+  console.log(`  Records: ${recordData.length + allNewRecords.length + 5} (incl. 5 superseded)`);
+  console.log("  Notes: 10 | Audit entries: 15");
 }
 
 main()

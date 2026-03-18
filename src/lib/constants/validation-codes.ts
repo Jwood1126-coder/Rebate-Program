@@ -18,6 +18,7 @@ export const VALIDATION_CODES = {
   EXPIRED_CONTRACT: "VAL-014",
   INVALID_DISCOUNT_TYPE: "VAL-015",
   PLAN_REQUIRED: "VAL-016",
+  PENDING_REVIEW_CONTRACT: "VAL-017",
 } as const;
 
 export type ValidationCode = (typeof VALIDATION_CODES)[keyof typeof VALIDATION_CODES];

@@ -72,9 +72,13 @@ export default async function ContractDetailPage({
       contract={{
         id: contract.id,
         contractNumber: contract.contractNumber,
+        customerNumber: contract.customerNumber,
         description: contract.description,
+        contractType: contract.contractType,
         startDate: formatDate(contract.startDate),
         endDate: formatDate(contract.endDate),
+        noticePeriodDays: contract.noticePeriodDays,
+        lastReviewedAt: contract.lastReviewedAt?.toISOString() ?? null,
         status: contract.status,
         updatedAt: contract.updatedAt.toISOString(),
         distributor: {

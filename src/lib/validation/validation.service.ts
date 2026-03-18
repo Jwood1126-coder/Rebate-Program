@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db/client";
 import { VALIDATION_CODES } from "@/lib/constants/validation-codes";
-import { OVERLAP_EXCLUDED_STATUSES } from "@/lib/constants/statuses";
+import { OVERLAP_EXCLUDED_STATUSES, CONTRACT_TYPES } from "@/lib/constants/statuses";
 import { datesOverlap, isRetroactive, isFarFuture, safeParseDate } from "@/lib/utils/dates";
 import type { ValidationResult, ValidationIssue, RecordValidationInput, RecordValidationContext } from "./types";
 
@@ -76,7 +76,40 @@ export async function validateRecord(
     });
   }
 
-  if (!input.endDate) {
+  // --- Look up parent contract for type-aware validation ---
+  let contractType: string | null = null;
+  if (input.rebatePlanId) {
+    const plan = await prisma.rebatePlan.findUnique({
+      where: { id: input.rebatePlanId },
+      include: { contract: { select: { status: true, contractType: true } } },
+    });
+
+    if (plan) {
+      contractType = plan.contract.contractType;
+
+      if (plan.contract.status === "expired") {
+        warnings.push({
+          field: "rebatePlanId",
+          code: VALIDATION_CODES.EXPIRED_CONTRACT,
+          severity: "warning",
+          message: "This contract has an expired status. Adding records to an expired contract may indicate a data issue.",
+        });
+      }
+
+      if (plan.contract.status === "pending_review") {
+        warnings.push({
+          field: "rebatePlanId",
+          code: VALIDATION_CODES.PENDING_REVIEW_CONTRACT,
+          severity: "warning",
+          message: "This contract is pending review and has not yet been approved. Records added to unapproved contracts may need to be reviewed after contract approval.",
+        });
+      }
+    }
+  }
+
+  // Open-ended record warning — suppressed when parent contract is evergreen,
+  // because open-ended records are the expected norm under evergreen contracts.
+  if (!input.endDate && contractType !== CONTRACT_TYPES.EVERGREEN) {
     warnings.push({
       field: "endDate",
       code: VALIDATION_CODES.NO_END_DATE,
@@ -104,12 +137,13 @@ export async function validateRecord(
       ? { id: { notIn: excludeIds } }
       : undefined;
 
-    // Duplicate: same plan + item + start_date
+    // Duplicate: same plan + item + start_date (excluding superseded/cancelled — same as overlap check)
     const duplicate = await prisma.rebateRecord.findFirst({
       where: {
         rebatePlanId: input.rebatePlanId,
         itemId: input.itemId,
         startDate: startDate,
+        status: { notIn: Array.from(OVERLAP_EXCLUDED_STATUSES) },
         ...excludeClause,
       },
     });
@@ -143,23 +177,6 @@ export async function validateRecord(
         });
         break; // One overlap error is sufficient
       }
-    }
-  }
-
-  // --- Contract status check ---
-  if (input.rebatePlanId) {
-    const plan = await prisma.rebatePlan.findUnique({
-      where: { id: input.rebatePlanId },
-      include: { contract: true },
-    });
-
-    if (plan?.contract.status === "expired") {
-      warnings.push({
-        field: "rebatePlanId",
-        code: VALIDATION_CODES.EXPIRED_CONTRACT,
-        severity: "warning",
-        message: "This contract has an expired status. Adding records to an expired contract may indicate a data issue.",
-      });
     }
   }
 

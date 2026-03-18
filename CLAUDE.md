@@ -41,6 +41,7 @@ If the answer is no, stop and reconsider.
 21. [Conventions and Standards](#21-conventions-and-standards)
 22. [When in Doubt](#22-when-in-doubt)
 23. [Safe Contribution Checklist](#23-safe-contribution-checklist)
+24. [Lessons from Contract Update Development](#24-lessons-from-contract-update-development)
 
 ---
 
@@ -701,3 +702,89 @@ Before considering any piece of work complete:
 - [ ] Ambiguities are flagged, not silently resolved.
 - [ ] The codebase is in a better state than before, or at minimum not worse.
 - [ ] I would be confident maintaining this code a year from now.
+
+---
+
+## 24. Lessons from Contract Update Development
+
+These rules were learned the hard way during the contract update workflow build. They are concrete, not generic.
+
+### Temporal Semantics Must Be Defined Before Coding
+
+If a feature uses effective dates, answer these questions first:
+- What is operative **now** vs **future-effective** vs **historical**?
+- Does the current data model support future-effective behavior? (`supersededById` is a binary flag — setting it makes the old record disappear immediately regardless of the new record's start date.)
+- If the model can't support a temporal feature truthfully, **constrain the feature** rather than shipping behavior that looks right in the UI but mutates operative data incorrectly.
+
+### Nested Route IDs Must Be Enforced
+
+If a route path is `/contracts/:id/update/:runId/...`, the handler must verify that `runId` belongs to `contractId`. Do not rely on UI navigation to prevent mismatched IDs. This applies to every nested resource pattern in the system.
+
+### Do Not Claim Override Support Without Tests
+
+If a service function accepts `resolutionData` with fields like `targetPlanId`, `effectiveDate`, or `price`, each override path must have a direct test proving it works. An untested override path is a bug waiting to be discovered — or worse, a feature the UI implies but the backend ignores.
+
+### Prefer Narrowing Over Pretending
+
+When a behavior cannot be implemented correctly in the current model:
+- Reject the invalid input with a clear error message
+- Update the UI to match the constraint (e.g., `max` attribute on date inputs, explanatory copy)
+- Document why in a code comment so the constraint can be revisited later
+- Do **not** leave a half-working feature that produces wrong results
+
+### Reuse Patterns Carefully
+
+The reconciliation pipeline is a good source of patterns (staged → review → commit, atomic transactions, audit logging, run progress). But contract updates have different semantics:
+- Reconciliation validates claims against existing data
+- Contract updates modify the data itself (supersession, new records, removals)
+- Forcing symmetry where semantics differ produces bugs (e.g., the future-effective issue came from copying supersession logic without considering temporal implications)
+
+### Business-Critical Edge Cases Need Explicit Tests
+
+These paths are especially dangerous and must have direct test coverage:
+- Ambiguous multi-plan matching (same-price collapse, snapshot false removals)
+- Snapshot vs delta removal semantics
+- Plan hint scoping (items in wrong plan, snapshot removal scoping)
+- Effective-date constraints
+- Contract invariants across all entry points (create, update, import)
+
+### Scope Claims Must Match the Implemented Slice
+
+Before calling a phase "done," compare the design intent against the actual schema, parser, service inputs, and UI:
+- If the implementation only supports item+price diffs, do not describe it as a full row-level contract update engine.
+- If a history panel is contract-scoped by `(distributorId, contractNumber)` but not `endUserId`, do not describe it as exact contract truth without naming the limitation.
+- If a feature omits staged raw rows, per-row date diffs, or committer attribution, say so plainly.
+
+Do not let phase summaries outrun the code.
+
+### History Features Need Exact Scoping and Exact Attribution
+
+Sales users read timeline and dispute surfaces as factual records, not as "best effort" views.
+
+For every history/query feature, answer these questions explicitly:
+- What exact keys make this result belong to this contract, record, run, or customer?
+- Does the query key match the schema's actual uniqueness constraint?
+- Is the displayed user the uploader, resolver, committer, or modifier? These are not interchangeable.
+- Is the event describing this specific contract, or a broader distributor-level activity that only partially overlaps?
+
+If exact scoping is not possible in the current data model, narrow the label and document the limitation in code comments and user-facing copy.
+
+### Query Surfaces Need Route-Level Tests, Not Just Service Tests
+
+When adding reporting/history endpoints such as activity feeds, dispute panels, or cross-run summaries:
+- Add tests for scoping correctness, not just happy-path payload shape
+- Test empty states and limit/pagination behavior
+- Test that unrelated contracts/customers/distributors do not leak into the result
+- Test the exact actor/summary attribution when the UI claims audit-like truth
+
+Service-layer tests are necessary but not sufficient for derived query surfaces.
+
+### Large Internal-Tool Files Should Be Split Before They Become Opaque
+
+This codebase now has several files crossing the "hard to reason about quickly" threshold. Once a file is roughly 500+ lines and mixes multiple responsibilities, pause and consider extraction:
+- route/data orchestration vs rendering
+- display components vs action controls
+- diffing/matching logic vs persistence
+- timeline/dispute panels vs contract detail shell
+
+Do not refactor for aesthetics alone, but do not let "it works" become an excuse for accumulating opaque, multi-purpose files in core workflows.

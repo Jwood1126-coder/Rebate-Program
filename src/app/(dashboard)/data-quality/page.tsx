@@ -54,6 +54,21 @@ function fmtDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+/** Compute the overlap window between two date ranges */
+function getOverlapWindow(
+  aStart: string, aEnd: string | null,
+  bStart: string, bEnd: string | null
+): { start: string; end: string | null; days: number } {
+  const start = new Date(aStart) > new Date(bStart) ? aStart : bStart;
+  const aEndMs = aEnd ? new Date(aEnd).getTime() : Infinity;
+  const bEndMs = bEnd ? new Date(bEnd).getTime() : Infinity;
+  const endMs = Math.min(aEndMs, bEndMs);
+  const end = endMs === Infinity ? null : new Date(endMs).toISOString();
+  const startMs = new Date(start).getTime();
+  const days = endMs === Infinity ? -1 : Math.max(1, Math.round((endMs - startMs) / 86400000));
+  return { start, end, days };
+}
+
 export default function DataQualityPage() {
   const [data, setData] = useState<DqData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -175,38 +190,11 @@ export default function DataQualityPage() {
       {duplicates.length > 0 && (
         <Section
           title="Duplicate Records"
-          subtitle="Same plan + item + start date appearing more than once. These should be reviewed and consolidated."
+          subtitle="Same plan + item + start date appearing more than once. Click a row to see details and fix."
           severity="error"
           count={duplicates.length}
         >
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-brennan-border bg-gray-50">
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Distributor</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Contract</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Plan</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Item</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Start Date</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">Copies</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Record IDs</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-brennan-border">
-              {duplicates.map((d, i) => (
-                <tr key={i} className="hover:bg-red-50/50">
-                  <td className="px-3 py-2">
-                    <DistBadge code={d.distributor} />
-                  </td>
-                  <td className="px-3 py-2 text-sm">{d.contractNumber}</td>
-                  <td className="px-3 py-2 text-sm text-gray-600">{d.planCode}</td>
-                  <td className="px-3 py-2 font-mono text-sm">{d.itemNumber}</td>
-                  <td className="px-3 py-2 text-sm">{fmtDate(d.startDate)}</td>
-                  <td className="px-3 py-2 text-right text-sm font-bold text-red-600">{d.count}</td>
-                  <td className="px-3 py-2 text-xs text-gray-400">{d.recordIds.join(", ")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DuplicateList duplicates={duplicates} />
         </Section>
       )}
 
@@ -214,42 +202,11 @@ export default function DataQualityPage() {
       {overlaps.length > 0 && (
         <Section
           title="Overlapping Date Ranges"
-          subtitle="Same plan + item with date ranges that overlap. One record should be end-dated or superseded."
+          subtitle="Same plan + item with date ranges that overlap — two prices in effect simultaneously. Click a row to see details."
           severity="error"
           count={overlaps.length}
         >
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-brennan-border bg-gray-50">
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Distributor</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Contract</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Item</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Record A</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Record B</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-brennan-border">
-              {overlaps.map((o, i) => (
-                <tr key={i} className="hover:bg-red-50/50">
-                  <td className="px-3 py-2">
-                    <DistBadge code={o.distributor} />
-                  </td>
-                  <td className="px-3 py-2 text-sm">{o.contractNumber}</td>
-                  <td className="px-3 py-2 font-mono text-sm">{o.itemNumber}</td>
-                  <td className="px-3 py-2 text-xs">
-                    <span className="font-medium text-brennan-text">#{o.recordA.id}</span>{" "}
-                    ${o.recordA.price.toFixed(2)}<br />
-                    <span className="text-gray-400">{fmtDate(o.recordA.start)} – {fmtDate(o.recordA.end)}</span>
-                  </td>
-                  <td className="px-3 py-2 text-xs">
-                    <span className="font-medium text-brennan-text">#{o.recordB.id}</span>{" "}
-                    ${o.recordB.price.toFixed(2)}<br />
-                    <span className="text-gray-400">{fmtDate(o.recordB.start)} – {fmtDate(o.recordB.end)}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <OverlapList overlaps={overlaps} />
         </Section>
       )}
 
@@ -257,40 +214,11 @@ export default function DataQualityPage() {
       {priceAnomalies.length > 0 && (
         <Section
           title="Price Anomalies"
-          subtitle="Items with >50% price variance across contracts. May indicate data entry errors or legitimate tiered pricing."
+          subtitle="Items with >50% price variance across contracts. Click a row to see details."
           severity="warn"
           count={priceAnomalies.length}
         >
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-brennan-border bg-gray-50">
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Item</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">Min Price</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Context</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">Max Price</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Context</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">Variance</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">Records</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-brennan-border">
-              {priceAnomalies.map((a, i) => (
-                <tr key={i} className="hover:bg-amber-50/50">
-                  <td className="px-3 py-2 font-mono text-sm">{a.itemNumber}</td>
-                  <td className="px-3 py-2 text-right text-sm font-medium text-green-700">${a.minPrice.toFixed(2)}</td>
-                  <td className="px-3 py-2 text-xs text-gray-500">{a.minContext}</td>
-                  <td className="px-3 py-2 text-right text-sm font-medium text-red-600">${a.maxPrice.toFixed(2)}</td>
-                  <td className="px-3 py-2 text-xs text-gray-500">{a.maxContext}</td>
-                  <td className="px-3 py-2 text-right">
-                    <span className={`rounded px-1.5 py-0.5 text-xs font-bold ${a.variancePct > 100 ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
-                      {a.variancePct}%
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-right text-sm text-gray-500">{a.recordCount}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <PriceAnomalyList anomalies={priceAnomalies} />
         </Section>
       )}
 
@@ -298,38 +226,11 @@ export default function DataQualityPage() {
       {contractOverlaps.length > 0 && (
         <Section
           title="Overlapping Contracts"
-          subtitle="Same distributor + end user with overlapping contract date ranges. May indicate duplicate contract entries."
+          subtitle="Same distributor + end user with overlapping contract date ranges. Click a row to see details."
           severity="warn"
           count={contractOverlaps.length}
         >
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-brennan-border bg-gray-50">
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Distributor</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">End User</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Contract A</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">Contract B</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-brennan-border">
-              {contractOverlaps.map((c, i) => (
-                <tr key={i} className="hover:bg-amber-50/50">
-                  <td className="px-3 py-2">
-                    <DistBadge code={c.distributor} />
-                  </td>
-                  <td className="px-3 py-2 text-sm">{c.endUser}</td>
-                  <td className="px-3 py-2 text-xs">
-                    <span className="font-medium">{c.contractA.number}</span><br />
-                    <span className="text-gray-400">{fmtDate(c.contractA.start)} – {fmtDate(c.contractA.end)}</span>
-                  </td>
-                  <td className="px-3 py-2 text-xs">
-                    <span className="font-medium">{c.contractB.number}</span><br />
-                    <span className="text-gray-400">{fmtDate(c.contractB.start)} – {fmtDate(c.contractB.end)}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <ContractOverlapList contractOverlaps={contractOverlaps} />
         </Section>
       )}
 
@@ -354,6 +255,468 @@ export default function DataQualityPage() {
       <p className="text-xs text-gray-400 text-center">
         <Link href="/" className="hover:underline">← Back to Dashboard</Link>
       </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Expandable overlap rows
+// ---------------------------------------------------------------------------
+function OverlapList({ overlaps }: { overlaps: DqData["overlaps"] }) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  function toggle(i: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
+  return (
+    <div className="divide-y divide-brennan-border">
+      {overlaps.map((o, i) => {
+        const isOpen = expanded.has(i);
+        const priceDiff = Math.abs(o.recordB.price - o.recordA.price);
+        const window = getOverlapWindow(o.recordA.start, o.recordA.end, o.recordB.start, o.recordB.end);
+        const olderRecord = new Date(o.recordA.start) <= new Date(o.recordB.start) ? o.recordA : o.recordB;
+        const newerRecord = olderRecord === o.recordA ? o.recordB : o.recordA;
+
+        return (
+          <div key={i}>
+            {/* Summary row */}
+            <button
+              onClick={() => toggle(i)}
+              className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-red-50/50 transition-colors ${isOpen ? "bg-red-50/30" : ""}`}
+            >
+              <svg
+                className={`h-3.5 w-3.5 text-gray-400 shrink-0 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+              <DistBadge code={o.distributor} />
+              <span className="font-mono text-sm text-gray-900">{o.itemNumber}</span>
+              <span className="text-xs text-gray-400">|</span>
+              <span className="text-xs text-gray-500">Contract {o.contractNumber}</span>
+              <span className="ml-auto flex items-center gap-3 shrink-0">
+                <span className="text-xs text-gray-500">
+                  <span className="font-medium text-gray-700">#{olderRecord.id}</span>
+                  {" "}${olderRecord.price.toFixed(2)}
+                  <span className="mx-1 text-gray-300">/</span>
+                  <span className="font-medium text-gray-700">#{newerRecord.id}</span>
+                  {" "}${newerRecord.price.toFixed(2)}
+                </span>
+                {priceDiff > 0 && (
+                  <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-bold text-red-700">
+                    ${priceDiff.toFixed(2)} diff
+                  </span>
+                )}
+              </span>
+            </button>
+
+            {/* Expanded detail */}
+            {isOpen && (
+              <div className="bg-gray-50/80 border-t border-gray-100 px-4 py-4 space-y-4">
+                {/* Side-by-side comparison */}
+                <div className="grid grid-cols-2 gap-4">
+                  <RecordCard
+                    label="Record A (older)"
+                    record={olderRecord}
+                    itemNumber={o.itemNumber}
+                    distributor={o.distributor}
+                    accent="blue"
+                  />
+                  <RecordCard
+                    label="Record B (newer)"
+                    record={newerRecord}
+                    itemNumber={o.itemNumber}
+                    distributor={o.distributor}
+                    accent="amber"
+                  />
+                </div>
+
+                {/* Overlap window */}
+                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+                  <div className="flex items-center gap-2 text-sm">
+                    <svg className="h-4 w-4 text-red-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="font-medium text-red-800">
+                      Overlap: {fmtDate(window.start)} – {fmtDate(window.end)}
+                    </span>
+                    {window.days > 0 && (
+                      <span className="text-red-600">({window.days} day{window.days !== 1 ? "s" : ""})</span>
+                    )}
+                    {window.days === -1 && (
+                      <span className="text-red-600">(indefinite — no end date)</span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-red-700">
+                    During this period, both records claim to set the price for <span className="font-mono font-medium">{o.itemNumber}</span>.
+                    {priceDiff > 0
+                      ? ` The prices differ by $${priceDiff.toFixed(2)}.`
+                      : " The prices are identical — likely a duplicate entry."
+                    }
+                  </p>
+                </div>
+
+                {/* Recommended action */}
+                <div className="rounded-lg border border-brennan-border bg-white px-4 py-3">
+                  <p className="text-xs font-semibold uppercase text-gray-500 mb-2">Recommended action</p>
+                  {priceDiff > 0 ? (
+                    <div className="space-y-1.5 text-xs text-gray-700">
+                      <p>This looks like a <span className="font-medium">price change</span>. The newer record (#{ newerRecord.id}) likely replaces the older one.</p>
+                      <p>
+                        <span className="font-medium">To fix:</span> Open Record #{olderRecord.id} and either{" "}
+                        <span className="font-medium">supersede</span> it (creates a proper chain) or{" "}
+                        <span className="font-medium">set its end date</span> to {fmtDate(newerRecord.start)} so the ranges don&apos;t overlap.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 text-xs text-gray-700">
+                      <p>Both records have the <span className="font-medium">same price</span> — this is likely a <span className="font-medium">duplicate</span>.</p>
+                      <p>
+                        <span className="font-medium">To fix:</span> Open Record #{newerRecord.id} and <span className="font-medium">cancel</span> it, keeping Record #{olderRecord.id} as the authoritative version.
+                      </p>
+                    </div>
+                  )}
+                  <Link
+                    href={`/records?search=${encodeURIComponent(o.itemNumber)}&distributor=${encodeURIComponent(o.distributor)}`}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brennan-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-brennan-blue/90 transition-colors"
+                  >
+                    View in Records
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                  </Link>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RecordCard({ label, record, itemNumber, distributor, accent }: {
+  label: string;
+  record: { id: number; start: string; end: string | null; price: number };
+  itemNumber: string;
+  distributor: string;
+  accent: "blue" | "amber";
+}) {
+  const borderColor = accent === "blue" ? "border-l-brennan-blue" : "border-l-amber-400";
+  return (
+    <div className={`rounded-lg border border-gray-200 border-l-4 ${borderColor} bg-white px-4 py-3`}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold uppercase text-gray-500">{label}</span>
+        <Link
+          href={`/records?search=${encodeURIComponent(itemNumber)}&distributor=${encodeURIComponent(distributor)}`}
+          className="text-xs font-medium text-brennan-blue hover:underline"
+        >
+          #{record.id}
+        </Link>
+      </div>
+      <div className="grid grid-cols-2 gap-y-1 text-xs">
+        <span className="text-gray-500">Price</span>
+        <span className="font-mono font-medium text-gray-900">${record.price.toFixed(2)}</span>
+        <span className="text-gray-500">Start</span>
+        <span className="text-gray-900">{fmtDate(record.start)}</span>
+        <span className="text-gray-500">End</span>
+        <span className="text-gray-900">{fmtDate(record.end)}</span>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Expandable duplicate rows
+// ---------------------------------------------------------------------------
+function DuplicateList({ duplicates }: { duplicates: DqData["duplicates"] }) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  function toggle(i: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
+  return (
+    <div className="divide-y divide-brennan-border">
+      {duplicates.map((d, i) => {
+        const isOpen = expanded.has(i);
+        return (
+          <div key={i}>
+            <button
+              onClick={() => toggle(i)}
+              className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-red-50/50 transition-colors ${isOpen ? "bg-red-50/30" : ""}`}
+            >
+              <svg
+                className={`h-3.5 w-3.5 text-gray-400 shrink-0 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+              <DistBadge code={d.distributor} />
+              <span className="font-mono text-sm text-gray-900">{d.itemNumber}</span>
+              <span className="text-xs text-gray-400">|</span>
+              <span className="text-xs text-gray-500">Contract {d.contractNumber}, Plan {d.planCode}</span>
+              <span className="text-xs text-gray-400">|</span>
+              <span className="text-xs text-gray-500">{fmtDate(d.startDate)}</span>
+              <span className="ml-auto shrink-0">
+                <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">
+                  {d.count} copies
+                </span>
+              </span>
+            </button>
+
+            {isOpen && (
+              <div className="bg-gray-50/80 border-t border-gray-100 px-4 py-4 space-y-3">
+                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+                  <div className="flex items-center gap-2 text-sm">
+                    <svg className="h-4 w-4 text-red-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="font-medium text-red-800">
+                      {d.count} records with identical plan + item + start date
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-red-700">
+                    Records {d.recordIds.map(id => `#${id}`).join(", ")} all share the same plan (<span className="font-medium">{d.planCode}</span>),
+                    item (<span className="font-mono font-medium">{d.itemNumber}</span>), and
+                    start date (<span className="font-medium">{fmtDate(d.startDate)}</span>).
+                    Only one should exist.
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-brennan-border bg-white px-4 py-3">
+                  <p className="text-xs font-semibold uppercase text-gray-500 mb-2">Recommended action</p>
+                  <div className="space-y-1.5 text-xs text-gray-700">
+                    <p>Open the records in the Records page and compare them. Keep the correct one and <span className="font-medium">cancel</span> the others.</p>
+                    <p>If the prices differ, the most recently created record is usually the intended one.</p>
+                  </div>
+                  <Link
+                    href={`/records?search=${encodeURIComponent(d.itemNumber)}&distributor=${encodeURIComponent(d.distributor)}`}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brennan-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-brennan-blue/90 transition-colors"
+                  >
+                    View in Records
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                  </Link>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Expandable price anomaly rows
+// ---------------------------------------------------------------------------
+function PriceAnomalyList({ anomalies }: { anomalies: DqData["priceAnomalies"] }) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  function toggle(i: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
+  return (
+    <div className="divide-y divide-brennan-border">
+      {anomalies.map((a, i) => {
+        const isOpen = expanded.has(i);
+        return (
+          <div key={i}>
+            <button
+              onClick={() => toggle(i)}
+              className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-amber-50/50 transition-colors ${isOpen ? "bg-amber-50/30" : ""}`}
+            >
+              <svg
+                className={`h-3.5 w-3.5 text-gray-400 shrink-0 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+              <span className="font-mono text-sm text-gray-900">{a.itemNumber}</span>
+              <span className="text-xs text-gray-400">|</span>
+              <span className="text-xs text-gray-500">{a.recordCount} records</span>
+              <span className="ml-auto flex items-center gap-3 shrink-0">
+                <span className="text-xs">
+                  <span className="font-medium text-green-700">${a.minPrice.toFixed(2)}</span>
+                  <span className="mx-1.5 text-gray-300">→</span>
+                  <span className="font-medium text-red-600">${a.maxPrice.toFixed(2)}</span>
+                </span>
+                <span className={`rounded px-1.5 py-0.5 text-xs font-bold ${a.variancePct > 100 ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
+                  {a.variancePct}% variance
+                </span>
+              </span>
+            </button>
+
+            {isOpen && (
+              <div className="bg-gray-50/80 border-t border-gray-100 px-4 py-4 space-y-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="rounded-lg border border-gray-200 border-l-4 border-l-green-500 bg-white px-4 py-3">
+                    <p className="text-xs font-semibold uppercase text-gray-500 mb-1">Lowest Price</p>
+                    <p className="font-mono text-lg font-bold text-green-700">${a.minPrice.toFixed(2)}</p>
+                    <p className="text-xs text-gray-500 mt-1">{a.minContext}</p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 border-l-4 border-l-red-500 bg-white px-4 py-3">
+                    <p className="text-xs font-semibold uppercase text-gray-500 mb-1">Highest Price</p>
+                    <p className="font-mono text-lg font-bold text-red-600">${a.maxPrice.toFixed(2)}</p>
+                    <p className="text-xs text-gray-500 mt-1">{a.maxContext}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                  <div className="flex items-center gap-2 text-sm">
+                    <svg className="h-4 w-4 text-amber-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="font-medium text-amber-800">
+                      {a.variancePct}% price variance across {a.recordCount} records
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-amber-700">
+                    {a.variancePct > 100
+                      ? "This is a very large variance. Check for data entry errors (decimal point, wrong unit)."
+                      : "This may be legitimate (different contract tiers, volume pricing) or a data entry error."
+                    }
+                  </p>
+                </div>
+
+                <Link
+                  href={`/records?search=${encodeURIComponent(a.itemNumber)}`}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-brennan-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-brennan-blue/90 transition-colors"
+                >
+                  View all records for {a.itemNumber}
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                  </svg>
+                </Link>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Expandable contract overlap rows
+// ---------------------------------------------------------------------------
+function ContractOverlapList({ contractOverlaps }: { contractOverlaps: DqData["contractOverlaps"] }) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  function toggle(i: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
+  return (
+    <div className="divide-y divide-brennan-border">
+      {contractOverlaps.map((c, i) => {
+        const isOpen = expanded.has(i);
+        const window = getOverlapWindow(c.contractA.start, c.contractA.end, c.contractB.start, c.contractB.end);
+
+        return (
+          <div key={i}>
+            <button
+              onClick={() => toggle(i)}
+              className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-amber-50/50 transition-colors ${isOpen ? "bg-amber-50/30" : ""}`}
+            >
+              <svg
+                className={`h-3.5 w-3.5 text-gray-400 shrink-0 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+              <DistBadge code={c.distributor} />
+              <span className="text-sm text-gray-900">{c.endUser}</span>
+              <span className="text-xs text-gray-400">|</span>
+              <span className="text-xs text-gray-500">
+                {c.contractA.number} / {c.contractB.number}
+              </span>
+              <span className="ml-auto shrink-0">
+                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-bold text-amber-700">
+                  {window.days > 0 ? `${window.days} day overlap` : "indefinite overlap"}
+                </span>
+              </span>
+            </button>
+
+            {isOpen && (
+              <div className="bg-gray-50/80 border-t border-gray-100 px-4 py-4 space-y-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="rounded-lg border border-gray-200 border-l-4 border-l-brennan-blue bg-white px-4 py-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold uppercase text-gray-500">Contract A</span>
+                      <Link
+                        href={`/contracts?search=${encodeURIComponent(c.contractA.number)}`}
+                        className="text-xs font-medium text-brennan-blue hover:underline"
+                      >
+                        {c.contractA.number}
+                      </Link>
+                    </div>
+                    <div className="text-xs">
+                      <span className="text-gray-500">Period: </span>
+                      <span className="text-gray-900">{fmtDate(c.contractA.start)} – {fmtDate(c.contractA.end)}</span>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 border-l-4 border-l-amber-400 bg-white px-4 py-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold uppercase text-gray-500">Contract B</span>
+                      <Link
+                        href={`/contracts?search=${encodeURIComponent(c.contractB.number)}`}
+                        className="text-xs font-medium text-brennan-blue hover:underline"
+                      >
+                        {c.contractB.number}
+                      </Link>
+                    </div>
+                    <div className="text-xs">
+                      <span className="text-gray-500">Period: </span>
+                      <span className="text-gray-900">{fmtDate(c.contractB.start)} – {fmtDate(c.contractB.end)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                  <div className="flex items-center gap-2 text-sm">
+                    <svg className="h-4 w-4 text-amber-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="font-medium text-amber-800">
+                      Overlap: {fmtDate(window.start)} – {fmtDate(window.end)}
+                      {window.days > 0 && <span className="font-normal text-amber-600"> ({window.days} days)</span>}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-amber-700">
+                    Two contracts for {c.endUser} under {c.distributor} are active at the same time.
+                    This may be a legitimate renewal/transition or a duplicate contract entry.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

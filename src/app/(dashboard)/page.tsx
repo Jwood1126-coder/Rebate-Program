@@ -44,6 +44,7 @@ export default async function DashboardPage() {
     expiredNotSupersededCount,
     orphanedItemCount,
     reconProgress,
+    pendingReviewContracts,
   ] = await Promise.all([
     prisma.rebateRecord.count({ where: activeWhere }),
     prisma.rebateRecord.count(),
@@ -149,6 +150,9 @@ export default async function DashboardPage() {
       ]);
       return { withContracts, completedRuns, period: lastMonth };
     })(),
+
+    // Contracts pending review
+    prisma.contract.count({ where: { status: "pending_review" } }),
   ]);
 
   const expiringCount = expiringRecords.length;
@@ -184,8 +188,10 @@ export default async function DashboardPage() {
         <MetricCard
           title="Contracts"
           value={contractCount}
-          href="/records"
+          subtitle={pendingReviewContracts > 0 ? `${pendingReviewContracts} pending review` : undefined}
+          href="/contracts"
           accent="blue"
+          alert={pendingReviewContracts > 0}
         />
         <MetricCard
           title="Items"

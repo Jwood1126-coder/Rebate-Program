@@ -413,7 +413,7 @@ export async function commitContractImport(
           description: allRows[0].description || null,
           startDate: contractStartDate ? new Date(contractStartDate) : null,
           endDate: contractEndDate ? new Date(contractEndDate) : null,
-          status: 'active',
+          status: 'pending_review',
         },
       });
 
@@ -507,6 +507,9 @@ export interface SimpleImportContext {
   planName?: string;
   discountType: string;
   description?: string;
+  customerNumber?: string;
+  contractType?: string;   // fixed_term (default) or evergreen
+  noticePeriodDays?: number;
   startDate: string;
   endDate?: string;
 }
@@ -806,21 +809,29 @@ export async function commitSimpleImport(
   const result = await prisma.$transaction(async (tx) => {
     const contractNumber = await generateContractNumber(tx);
 
+    const contractType = context.contractType || 'fixed_term';
     const contract = await tx.contract.create({
       data: {
         distributorId: distributor.id,
         endUserId: endUser.id,
         contractNumber,
+        customerNumber: context.customerNumber || null,
         description: context.description || null,
+        contractType,
+        noticePeriodDays: contractType === 'evergreen' && context.noticePeriodDays
+          ? context.noticePeriodDays
+          : null,
         startDate,
         endDate,
-        status: 'active',
+        status: 'pending_review',
       },
     });
     await auditInTx(tx, 'contracts', contract.id, {
       distributorId: distributor.id,
       endUserId: endUser.id,
       contractNumber,
+      customerNumber: context.customerNumber || null,
+      contractType,
       source: 'simple_import',
       fileName,
     }, userId);

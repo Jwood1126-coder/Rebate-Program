@@ -12,7 +12,7 @@
 //   7. Is this a duplicate claim line?
 
 import { prisma } from '@/lib/db/client';
-import { EXCEPTION_CODES, RUN_STATUSES } from './types';
+import { EXCEPTION_CODES, RUN_STATUSES, PRICE_MATCH_TOLERANCE } from './types';
 import type { Prisma } from '@prisma/client';
 
 export interface ValidationResult {
@@ -36,8 +36,8 @@ interface IssueSummary {
   suggestedData?: Record<string, unknown> | null;
 }
 
-// Price tolerance: $0.01 — differences within this are not flagged
-const PRICE_TOLERANCE = 0.01;
+// Re-exported from types.ts — see PRICE_MATCH_TOLERANCE / ARITHMETIC_TOLERANCE
+const PRICE_TOLERANCE = PRICE_MATCH_TOLERANCE;
 
 /**
  * Validate all staged claim rows for a reconciliation run.

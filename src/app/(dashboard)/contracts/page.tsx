@@ -34,6 +34,7 @@ function buildWhere(params: SearchParams): Prisma.ContractWhereInput {
     conditions.push({
       OR: [
         { contractNumber: { contains: q, mode: "insensitive" } },
+        { customerNumber: { contains: q, mode: "insensitive" } },
         { distributor: { code: { contains: q, mode: "insensitive" } } },
         { distributor: { name: { contains: q, mode: "insensitive" } } },
         { endUser: { name: { contains: q, mode: "insensitive" } } },
@@ -131,13 +132,14 @@ export default async function ContractsPage({
   const contracts = rawContracts.map((c) => ({
     id: c.id,
     contractNumber: c.contractNumber,
+    customerNumber: c.customerNumber,
+    contractType: c.contractType,
     distributor: c.distributor.code,
     distributorName: c.distributor.name,
     endUser: c.endUser.name,
     startDate: formatDate(c.startDate),
     endDate: formatDate(c.endDate),
     status: c.status,
-    planCount: c._count.rebatePlans,
     recordCount: c.rebatePlans.reduce((sum, p) => sum + p._count.rebateRecords, 0),
     updatedAt: c.updatedAt.toISOString(),
     description: c.description,

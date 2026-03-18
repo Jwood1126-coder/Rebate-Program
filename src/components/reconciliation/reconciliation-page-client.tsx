@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import ColumnMappingModal from "./column-mapping-modal";
 
 interface Distributor {
   id: number;
@@ -49,68 +51,7 @@ interface ParseResult {
   errors?: string[];
 }
 
-interface ValidationIssue {
-  code: string;
-  severity: string;
-  category: string;
-  description: string;
-  rowNumber: number;
-  suggestedAction: string;
-}
-
-interface ValidationResult {
-  success: boolean;
-  runId: number;
-  totalRows: number;
-  validatedCount: number;
-  exceptionCount: number;
-  matchedCount: number;
-  issues: ValidationIssue[];
-}
-
-// Issue from the database (with id and resolution fields)
-interface ClaimRowData {
-  rowNumber: number;
-  contractNumber: string | null;
-  planCode: string | null;
-  itemNumber: string | null;
-  deviatedPrice: number | null;
-  quantity: number | null;
-  claimedAmount: number | null;
-  transactionDate: string | null;
-  endUserCode: string | null;
-  endUserName: string | null;
-  distributorOrderNumber: string | null;
-  matchedRecordId: number | null;
-}
-
-interface DbIssue {
-  id: number;
-  reconciliationRunId: number;
-  code: string;
-  severity: string;
-  category: string;
-  description: string;
-  claimRowId: number | null;
-  masterRecordId: number | null;
-  committedRecordId: number | null;
-  suggestedAction: string;
-  suggestedData: Record<string, unknown> | null;
-  resolution: string | null;
-  resolutionNote: string | null;
-  resolvedById: number | null;
-  resolvedAt: string | null;
-  resolvedBy: { displayName: string } | null;
-  claimRow: ClaimRowData | null;
-}
-
-interface RunProgress {
-  totalIssues: number;
-  resolvedCount: number;
-  pendingCount: number;
-  allResolved: boolean;
-  breakdown: Record<string, number>;
-}
+// Validation/review types now used on /reconciliation/run/[id] only
 
 interface QueueItem {
   distributorId: number;
@@ -150,6 +91,7 @@ export default function ReconciliationPageClient({
   initialRuns: ReconciliationRun[];
   configuredDistributors: string[];
 }) {
+  const router = useRouter();
   const [runs, setRuns] = useState<ReconciliationRun[]>(initialRuns);
   const [showUpload, setShowUpload] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -160,19 +102,12 @@ export default function ReconciliationPageClient({
   const [claimPeriod, setClaimPeriod] = useState<string>(getDefaultPeriod());
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Optional POS file in the same upload form
+  const [inlinePosFile, setInlinePosFile] = useState<File | null>(null);
+  const inlinePosFileInputRef = useRef<HTMLInputElement>(null);
+  const [inlinePosResult, setInlinePosResult] = useState<{ success: boolean; parseResult?: ParseResult; error?: string } | null>(null);
 
-  // Validation state
-  const [validating, setValidating] = useState<number | null>(null);
-  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
-
-  // Review state (Phase R3)
-  const [reviewRunId, setReviewRunId] = useState<number | null>(null);
-  const [reviewIssues, setReviewIssues] = useState<DbIssue[]>([]);
-  const [reviewProgress, setReviewProgress] = useState<RunProgress | null>(null);
-  const [loadingReview, setLoadingReview] = useState(false);
-  const [resolvingIssue, setResolvingIssue] = useState<number | null>(null);
-  const [expandedIssueId, setExpandedIssueId] = useState<number | null>(null);
-  const [bulkResolving, setBulkResolving] = useState(false);
+  // Validation/review/commit now happen on /reconciliation/run/[id]
 
   // Commit state (Phase R4)
   const [committing, setCommitting] = useState(false);
@@ -192,6 +127,31 @@ export default function ReconciliationPageClient({
   const [posUploading, setPosUploading] = useState(false);
   const [posUploadResult, setPosUploadResult] = useState<{ success: boolean; parseResult?: ParseResult; error?: string } | null>(null);
   const posFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Refs for auto-scrolling to the active workflow step
+  const uploadPanelRef = useRef<HTMLDivElement>(null);
+
+  // Scroll a ref into view after React re-renders
+  const scrollTo = useCallback((ref: React.RefObject<HTMLDivElement | null>) => {
+    requestAnimationFrame(() => {
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, []);
+
+  // Inline column mapping state (shown when upload detects no mapping)
+  interface MappingDetection {
+    distributorId: number;
+    distributorCode: string;
+    distributorName: string;
+    headers: string[];
+    suggestedMappings: Record<string, string>;
+    sampleData: Record<string, string[]>;
+    standardFields: Record<string, { label: string; required: boolean; group: string }>;
+    totalRows: number;
+    fileType?: string; // "claim" or "pos"
+  }
+  const [mappingDetection, setMappingDetection] = useState<MappingDetection | null>(null);
+  const [knownConfigured, setKnownConfigured] = useState<string[]>(configuredDistributors);
 
   // Queue state
   const [queuePeriod, setQueuePeriod] = useState<string>(getDefaultPeriod());
@@ -226,13 +186,7 @@ export default function ReconciliationPageClient({
   const [filterSearch, setFilterSearch] = useState<string>("");
 
   const selectedDistributor = distributors.find(d => d.id === Number(selectedDistributorId));
-  const hasMapping = selectedDistributor ? configuredDistributors.includes(selectedDistributor.code) : false;
-
-  // The run currently being reviewed (for durable commit summary)
-  const reviewRun = useMemo(
-    () => reviewRunId ? runs.find(r => r.id === reviewRunId) ?? null : null,
-    [reviewRunId, runs]
-  );
+  const hasMapping = selectedDistributor ? knownConfigured.includes(selectedDistributor.code) : false;
 
   // Filtered runs
   const filteredRuns = useMemo(() => {
@@ -294,7 +248,29 @@ export default function ReconciliationPageClient({
 
       const data = await res.json();
 
-      if (res.ok) {
+      if (res.ok && data.needsMapping) {
+        // No mapping configured — show inline mapping modal
+        setMappingDetection({
+          distributorId: data.distributorId,
+          distributorCode: data.distributorCode,
+          distributorName: data.distributorName,
+          headers: data.headers,
+          suggestedMappings: data.suggestedMappings,
+          sampleData: data.sampleData,
+          standardFields: data.standardFields,
+          totalRows: data.totalRows,
+          fileType: "claim",
+        });
+      } else if (res.ok) {
+        // Auto-upload POS file if provided alongside the claim
+        if (inlinePosFile && data.runId) {
+          await uploadPosForRun(data.runId, inlinePosFile);
+        }
+        // Redirect to the dedicated run workflow page
+        if (data.runId) {
+          router.push(`/reconciliation/run/${data.runId}`);
+          return;
+        }
         setUploadResult({ success: true, parseResult: data.parseResult });
         await refreshRuns();
       } else {
@@ -303,6 +279,7 @@ export default function ReconciliationPageClient({
           error: data.error || "Upload failed",
           parseResult: data.parseResult,
         });
+        scrollTo(uploadPanelRef);
       }
     } catch {
       setUploadResult({ success: false, error: "Network error. Please try again." });
@@ -311,115 +288,71 @@ export default function ReconciliationPageClient({
     }
   }
 
-  async function handleValidate(runId: number) {
-    setValidating(runId);
-    setValidationResult(null);
+  /** Upload a POS file for a given run (used by both inline upload form and standalone POS panel) */
+  async function uploadPosForRun(runId: number, file: File) {
+    setPosUploading(true);
+    setInlinePosResult(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("runId", String(runId));
 
     try {
-      const res = await fetch(`/api/reconciliation/runs/${runId}/validate`, {
+      const res = await fetch("/api/reconciliation/pos-upload", {
         method: "POST",
+        body: formData,
       });
       const data = await res.json();
 
-      if (res.ok) {
-        setValidationResult(data);
+      if (res.ok && data.needsMapping) {
+        // No POS mapping — show inline mapping modal
+        setMappingDetection({
+          distributorId: data.distributorId,
+          distributorCode: data.distributorCode,
+          distributorName: data.distributorName,
+          headers: data.headers,
+          suggestedMappings: data.suggestedMappings,
+          sampleData: data.sampleData,
+          standardFields: data.standardFields,
+          totalRows: data.totalRows,
+          fileType: "pos",
+        });
+        // Store runId so we can retry after mapping is saved
+        setPosUploadRunId(runId);
+        setPosFile(file);
+      } else if (res.ok) {
+        setInlinePosResult({ success: true, parseResult: data.parseResult });
         await refreshRuns();
+      } else {
+        setInlinePosResult({ success: false, error: data.error || "POS upload failed", parseResult: data.parseResult });
       }
     } catch {
-      // ignore
+      setInlinePosResult({ success: false, error: "POS upload failed — network error" });
     } finally {
-      setValidating(null);
+      setPosUploading(false);
     }
   }
 
-  const loadReviewIssues = useCallback(async (runId: number) => {
-    setLoadingReview(true);
-    try {
-      const res = await fetch(`/api/reconciliation/runs/${runId}/issues`);
-      if (res.ok) {
-        const data = await res.json();
-        setReviewIssues(data.issues);
-        setReviewProgress(data.progress);
-        setReviewRunId(runId);
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoadingReview(false);
+  async function handleMappingSaved() {
+    // Mapping was saved — update known configured list and auto-retry the upload
+    const wasPos = mappingDetection?.fileType === "pos";
+    if (mappingDetection) {
+      setKnownConfigured(prev =>
+        prev.includes(mappingDetection.distributorCode)
+          ? prev
+          : [...prev, mappingDetection.distributorCode]
+      );
     }
-  }, []);
-
-  async function handleReview(runId: number) {
-    // Clear validation result panel, show review panel instead
-    setValidationResult(null);
-    await loadReviewIssues(runId);
-  }
-
-  async function handleResolve(issueId: number, resolution: string, note?: string) {
-    setResolvingIssue(issueId);
-    try {
-      const res = await fetch(`/api/reconciliation/runs/${reviewRunId}/issues/${issueId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resolution, resolutionNote: note }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        // Update local state
-        setReviewIssues(prev =>
-          prev.map(issue =>
-            issue.id === issueId
-              ? { ...issue, resolution: data.issue.resolution, resolvedAt: data.issue.resolvedAt }
-              : issue
-          )
-        );
-        setReviewProgress(data.runProgress);
-        // If all resolved, refresh runs to update status
-        if (data.runProgress?.allResolved) {
-          await refreshRuns();
-        }
-      }
-    } catch {
-      // ignore
-    } finally {
-      setResolvingIssue(null);
+    setMappingDetection(null);
+    // Auto-retry the correct upload now that mapping is configured
+    if (wasPos) {
+      await handlePosUpload();
+    } else {
+      await handleUpload();
     }
   }
 
-  async function handleBulkResolve(resolution: string, filter: 'all' | 'warnings' | 'errors') {
-    if (!reviewRunId) return;
-    setBulkResolving(true);
-
-    const pendingIssues = reviewIssues.filter(i => !i.resolution);
-    const filtered = filter === 'all'
-      ? pendingIssues
-      : filter === 'warnings'
-        ? pendingIssues.filter(i => i.severity === 'warning')
-        : pendingIssues.filter(i => i.severity === 'error');
-
-    const issueIds = filtered.map(i => i.id);
-    if (issueIds.length === 0) {
-      setBulkResolving(false);
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/reconciliation/runs/${reviewRunId}/issues/bulk-resolve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ issueIds, resolution }),
-      });
-      if (res.ok) {
-        // Reload issues to get fresh state
-        await loadReviewIssues(reviewRunId);
-        await refreshRuns();
-      }
-    } catch {
-      // ignore
-    } finally {
-      setBulkResolving(false);
-    }
-  }
+  // Validate/review/resolve/bulk-resolve now happen on /reconciliation/run/[id]
 
   async function handlePosUpload() {
     if (!posFile || !posUploadRunId) return;
@@ -436,7 +369,21 @@ export default function ReconciliationPageClient({
         body: formData,
       });
       const data = await res.json();
-      if (res.ok) {
+
+      if (res.ok && data.needsMapping) {
+        // No POS mapping configured — show inline mapping modal
+        setMappingDetection({
+          distributorId: data.distributorId,
+          distributorCode: data.distributorCode,
+          distributorName: data.distributorName,
+          headers: data.headers,
+          suggestedMappings: data.suggestedMappings,
+          sampleData: data.sampleData,
+          standardFields: data.standardFields,
+          totalRows: data.totalRows,
+          fileType: "pos",
+        });
+      } else if (res.ok) {
         setPosUploadResult({ success: true, parseResult: data.parseResult });
         await refreshRuns();
       } else {
@@ -507,7 +454,10 @@ export default function ReconciliationPageClient({
     setSelectedFile(null);
     setSelectedDistributorId("");
     setClaimPeriod(getDefaultPeriod());
+    setInlinePosFile(null);
+    setInlinePosResult(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    if (inlinePosFileInputRef.current) inlinePosFileInputRef.current.value = "";
   }
 
   return (
@@ -522,7 +472,7 @@ export default function ReconciliationPageClient({
         </div>
         {!showUpload && (
           <button
-            onClick={() => setShowUpload(true)}
+            onClick={() => { setShowUpload(true); scrollTo(uploadPanelRef); }}
             className="rounded-lg bg-brennan-blue px-4 py-2 text-sm font-medium text-white hover:bg-brennan-blue/90 transition-colors"
           >
             New Reconciliation
@@ -613,6 +563,7 @@ export default function ReconciliationPageClient({
                             setSelectedDistributorId(String(dist.id));
                             setClaimPeriod(queuePeriod);
                             setShowUpload(true);
+                            scrollTo(uploadPanelRef);
                           }
                         }}
                         className="rounded bg-brennan-blue px-3 py-1 text-xs font-medium text-white hover:bg-brennan-blue/90"
@@ -621,33 +572,36 @@ export default function ReconciliationPageClient({
                       </button>
                     )}
                     {item.status === "needs_validation" && item.run && (
-                      <button
-                        onClick={() => handleValidate(item.run!.id)}
-                        disabled={validating !== null}
-                        className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-white hover:bg-amber-600 disabled:opacity-50"
+                      <a
+                        href={`/reconciliation/run/${item.run.id}`}
+                        className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-white hover:bg-amber-600"
                       >
-                        {validating === item.run.id ? "Validating..." : "Validate"}
-                      </button>
+                        Validate
+                      </a>
                     )}
                     {item.status === "in_review" && item.run && (
-                      <button
-                        onClick={() => handleReview(item.run!.id)}
+                      <a
+                        href={`/reconciliation/run/${item.run.id}`}
                         className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-white hover:bg-amber-600"
                       >
                         Review ({item.run.unresolvedCount})
-                      </button>
+                      </a>
                     )}
                     {item.status === "reviewed" && item.run && (
-                      <button
-                        onClick={() => handleCommit(item.run!.id)}
-                        disabled={committing}
-                        className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                      <a
+                        href={`/reconciliation/run/${item.run.id}`}
+                        className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700"
                       >
-                        {committing ? "Committing..." : "Commit"}
-                      </button>
+                        Commit
+                      </a>
                     )}
-                    {item.status === "committed" && (
-                      <span className="text-xs text-green-600 font-medium">Committed</span>
+                    {item.status === "committed" && item.run && (
+                      <a
+                        href={`/reconciliation/run/${item.run.id}`}
+                        className="text-xs text-green-600 font-medium hover:underline"
+                      >
+                        View
+                      </a>
                     )}
                   </div>
                 </div>
@@ -665,9 +619,10 @@ export default function ReconciliationPageClient({
 
       {/* Upload Panel */}
       {showUpload && (
-        <div className="rounded-xl border border-brennan-border bg-white shadow-sm">
+        <div ref={uploadPanelRef} className="rounded-xl border border-brennan-border bg-white shadow-sm">
           <div className="border-b border-brennan-border px-5 py-3">
-            <h2 className="text-base font-semibold text-brennan-text">Upload Claim File</h2>
+            <h2 className="text-base font-semibold text-brennan-text">New Reconciliation Run</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Upload the claim/debit file and optionally attach the POS report in one step</p>
           </div>
 
           <div className="px-5 py-4 space-y-4">
@@ -684,16 +639,13 @@ export default function ReconciliationPageClient({
                   {distributors.map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.code} — {d.name}
-                      {!configuredDistributors.includes(d.code) ? " (no mapping)" : ""}
+                      {!knownConfigured.includes(d.code) ? " (no mapping)" : ""}
                     </option>
                   ))}
                 </select>
                 {selectedDistributor && !hasMapping && (
                   <p className="mt-1 text-xs text-amber-600">
-                    No column mapping configured for {selectedDistributor.code}.{" "}
-                    <a href="/settings" className="underline text-brennan-blue hover:text-brennan-blue/80">
-                      Configure in Settings
-                    </a>
+                    No column mapping configured for {selectedDistributor.code} yet &mdash; you&apos;ll be prompted to set one up when you upload.
                   </p>
                 )}
               </div>
@@ -709,53 +661,100 @@ export default function ReconciliationPageClient({
               </div>
             </div>
 
-            {/* Step 2: File upload */}
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Claim File (.xlsx or .csv)</label>
-              <div className="flex items-center gap-3">
+            {/* Step 2: File uploads — Claim (required) + POS (optional) */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Claim / Debit File <span className="text-red-400">*</span>
+                </label>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".xlsx,.csv"
+                  accept=".xlsx,.xls,.csv"
                   onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                  className="block w-full text-sm text-gray-500 file:mr-4 file:rounded-lg file:border-0 file:bg-brennan-light file:px-4 file:py-2 file:text-sm file:font-medium file:text-brennan-blue hover:file:bg-brennan-light/80"
+                  className="block w-full text-sm text-gray-500 file:mr-3 file:rounded-lg file:border-0 file:bg-brennan-light file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brennan-blue hover:file:bg-brennan-light/80"
                 />
+                {selectedFile && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
+                  </p>
+                )}
               </div>
-              {selectedFile && (
-                <p className="mt-1 text-xs text-gray-500">
-                  {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
-                </p>
-              )}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  POS Report <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <input
+                  ref={inlinePosFileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={(e) => setInlinePosFile(e.target.files?.[0] || null)}
+                  className="block w-full text-sm text-gray-500 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-indigo-600 hover:file:bg-indigo-100"
+                />
+                {inlinePosFile && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    {inlinePosFile.name} ({(inlinePosFile.size / 1024).toFixed(1)} KB)
+                  </p>
+                )}
+              </div>
             </div>
 
-            {/* Upload result */}
+            {/* Upload results */}
             {uploadResult && (
-              <div className={`rounded-lg border p-4 ${uploadResult.success ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
-                {uploadResult.success ? (
-                  <div>
-                    <p className="text-sm font-medium text-green-800">Claim file staged successfully</p>
-                    {uploadResult.parseResult && (
-                      <div className="mt-2 flex gap-4 text-xs text-green-700">
-                        <span>{uploadResult.parseResult.totalRows} rows parsed</span>
-                        <span>{uploadResult.parseResult.validRows} valid</span>
-                        {uploadResult.parseResult.errorRows > 0 && (
-                          <span className="text-amber-700">{uploadResult.parseResult.errorRows} with errors</span>
+              <div className="space-y-2">
+                <div className={`rounded-lg border p-4 ${uploadResult.success ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
+                  {uploadResult.success ? (
+                    <div>
+                      <p className="text-sm font-medium text-green-800">Claim file staged successfully</p>
+                      {uploadResult.parseResult && (
+                        <div className="mt-2 flex gap-4 text-xs text-green-700">
+                          <span>{uploadResult.parseResult.totalRows} rows parsed</span>
+                          <span>{uploadResult.parseResult.validRows} valid</span>
+                          {uploadResult.parseResult.errorRows > 0 && (
+                            <span className="text-amber-700">{uploadResult.parseResult.errorRows} with errors</span>
+                          )}
+                        </div>
+                      )}
+                      {uploadResult.parseResult?.warnings && uploadResult.parseResult.warnings.length > 0 && (
+                        <ul className="mt-2 text-xs text-amber-700 list-disc pl-4">
+                          {uploadResult.parseResult.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                        </ul>
+                      )}
+                      {/* POS upload status when submitted alongside claim */}
+                      {inlinePosFile && posUploading && (
+                        <p className="mt-2 text-xs text-indigo-600">Uploading POS report...</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm font-medium text-red-800">{uploadResult.error}</p>
+                      {uploadResult.parseResult?.errors && uploadResult.parseResult.errors.length > 0 && (
+                        <ul className="mt-2 text-xs text-red-700 list-disc pl-4">
+                          {uploadResult.parseResult.errors.map((e, i) => <li key={i}>{e}</li>)}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Inline POS result */}
+                {inlinePosResult && (
+                  <div className={`rounded-lg border p-3 ${inlinePosResult.success ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}>
+                    {inlinePosResult.success ? (
+                      <div>
+                        <p className="text-sm font-medium text-green-800">POS report attached</p>
+                        {inlinePosResult.parseResult && (
+                          <p className="mt-1 text-xs text-green-700">
+                            {inlinePosResult.parseResult.totalRows} rows parsed
+                            ({inlinePosResult.parseResult.validRows} valid{inlinePosResult.parseResult.errorRows > 0 ? `, ${inlinePosResult.parseResult.errorRows} errors` : ""})
+                          </p>
                         )}
                       </div>
-                    )}
-                    {uploadResult.parseResult?.warnings && uploadResult.parseResult.warnings.length > 0 && (
-                      <ul className="mt-2 text-xs text-amber-700 list-disc pl-4">
-                        {uploadResult.parseResult.warnings.map((w, i) => <li key={i}>{w}</li>)}
-                      </ul>
-                    )}
-                  </div>
-                ) : (
-                  <div>
-                    <p className="text-sm font-medium text-red-800">{uploadResult.error}</p>
-                    {uploadResult.parseResult?.errors && uploadResult.parseResult.errors.length > 0 && (
-                      <ul className="mt-2 text-xs text-red-700 list-disc pl-4">
-                        {uploadResult.parseResult.errors.map((e, i) => <li key={i}>{e}</li>)}
-                      </ul>
+                    ) : (
+                      <div>
+                        <p className="text-sm font-medium text-amber-800">POS upload issue: {inlinePosResult.error}</p>
+                        <p className="mt-1 text-xs text-amber-600">You can attach the POS report later from the runs table.</p>
+                      </div>
                     )}
                   </div>
                 )}
@@ -772,328 +771,16 @@ export default function ReconciliationPageClient({
               </button>
               <button
                 onClick={handleUpload}
-                disabled={!selectedFile || !selectedDistributorId || !claimPeriod || !hasMapping || uploading}
+                disabled={!selectedFile || !selectedDistributorId || !claimPeriod || uploading}
                 className="rounded-lg bg-brennan-blue px-4 py-2 text-sm font-medium text-white hover:bg-brennan-blue/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {uploading ? "Uploading..." : "Upload & Parse"}
+                {uploading ? (posUploading ? "Uploading POS..." : "Uploading...") : inlinePosFile ? "Upload Both Files" : "Upload & Parse"}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Validation Results Panel (shown right after validation, before review) */}
-      {validationResult && (
-        <div className="rounded-xl border border-brennan-border bg-white shadow-sm">
-          <div className="border-b border-brennan-border px-5 py-3 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-brennan-text">
-              Validation Results — Run #{validationResult.runId}
-            </h2>
-            <div className="flex items-center gap-3">
-              {validationResult.issues.length > 0 && (
-                <button
-                  onClick={() => handleReview(validationResult.runId)}
-                  className="rounded bg-brennan-blue px-3 py-1 text-xs font-medium text-white hover:bg-brennan-blue/90"
-                >
-                  Review Exceptions
-                </button>
-              )}
-              <button
-                onClick={() => setValidationResult(null)}
-                className="text-xs text-gray-400 hover:text-gray-600"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-
-          <div className="px-5 py-4">
-            {/* Summary cards */}
-            <div className="grid grid-cols-4 gap-4 mb-4">
-              <SummaryCard label="Total Rows" value={validationResult.totalRows} />
-              <SummaryCard label="Matched" value={validationResult.matchedCount} color="green" />
-              <SummaryCard label="Exceptions" value={validationResult.exceptionCount} color={validationResult.exceptionCount > 0 ? "amber" : "green"} />
-              <SummaryCard
-                label="Clean Rate"
-                value={validationResult.totalRows > 0
-                  ? `${Math.round((validationResult.matchedCount / validationResult.totalRows) * 100)}%`
-                  : "—"}
-                color={validationResult.matchedCount === validationResult.totalRows ? "green" : "amber"}
-              />
-            </div>
-
-            {/* Exception list */}
-            {validationResult.issues.length > 0 && (
-              <div>
-                <h3 className="text-sm font-medium text-gray-700 mb-2">
-                  Exceptions ({validationResult.issues.length})
-                </h3>
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-gray-50 text-left text-gray-500 uppercase tracking-wider">
-                        <th className="px-3 py-2">Row</th>
-                        <th className="px-3 py-2">Code</th>
-                        <th className="px-3 py-2">Severity</th>
-                        <th className="px-3 py-2">Category</th>
-                        <th className="px-3 py-2">Description</th>
-                        <th className="px-3 py-2">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {validationResult.issues.map((issue, idx) => (
-                        <tr key={idx} className="hover:bg-gray-50/50">
-                          <td className="px-3 py-2 font-mono">{issue.rowNumber}</td>
-                          <td className="px-3 py-2 font-mono font-medium">{issue.code}</td>
-                          <td className="px-3 py-2">
-                            <SeverityBadge severity={issue.severity} />
-                          </td>
-                          <td className="px-3 py-2 font-medium text-gray-700">{issue.category}</td>
-                          <td className="px-3 py-2 text-gray-600 max-w-md">{issue.description}</td>
-                          <td className="px-3 py-2 text-gray-500">{issue.suggestedAction}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {validationResult.issues.length === 0 && (
-              <div className="text-center py-6">
-                <p className="text-sm font-medium text-green-700">All claim lines validated successfully — no exceptions found.</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Exception Review Panel (Phase R3) */}
-      {reviewRunId && !validationResult && (
-        <div className="rounded-xl border border-brennan-border bg-white shadow-sm">
-          <div className="border-b border-brennan-border px-5 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <h2 className="text-base font-semibold text-brennan-text">
-                Exception Review — Run #{reviewRunId}
-              </h2>
-              {reviewProgress && (
-                <span className="text-xs text-gray-500">
-                  {reviewProgress.resolvedCount}/{reviewProgress.totalIssues} resolved
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              {reviewRun && ["review", "reviewed", "committed"].includes(reviewRun.status) && (
-                <a
-                  href={`/api/export/reconciliation-run/${reviewRunId}`}
-                  download
-                  className="rounded border border-brennan-border px-2.5 py-1 text-xs font-medium text-brennan-blue hover:bg-brennan-light transition-colors"
-                >
-                  Export CSV
-                </a>
-              )}
-              <button
-                onClick={() => { setReviewRunId(null); setReviewIssues([]); setReviewProgress(null); setCommitResult(null); }}
-                className="text-xs text-gray-400 hover:text-gray-600"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-
-          <div className="px-5 py-4">
-            {loadingReview ? (
-              <div className="text-center py-6 text-sm text-gray-500">Loading issues...</div>
-            ) : (
-              <>
-                {/* Progress bar */}
-                {reviewProgress && reviewProgress.totalIssues > 0 && (
-                  <div className="mb-4">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-gray-500">Resolution Progress</span>
-                      <span className="text-xs font-medium text-gray-700">
-                        {Math.round((reviewProgress.resolvedCount / reviewProgress.totalIssues) * 100)}%
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className={`h-2 rounded-full transition-all ${reviewProgress.allResolved ? 'bg-green-500' : 'bg-brennan-blue'}`}
-                        style={{ width: `${(reviewProgress.resolvedCount / reviewProgress.totalIssues) * 100}%` }}
-                      />
-                    </div>
-                    {reviewProgress.allResolved && (
-                      <div className="mt-3 rounded-lg border border-green-200 bg-green-50 p-3">
-                        <p className="text-sm font-medium text-green-800">All exceptions resolved</p>
-                        <p className="mt-1 text-xs text-green-700">
-                          {reviewProgress.breakdown.approved ?? 0} approved, {reviewProgress.breakdown.rejected ?? 0} rejected, {reviewProgress.breakdown.dismissed ?? 0} dismissed
-                        </p>
-
-                        {commitResult?.error ? (
-                          <div className="mt-2 rounded border border-red-200 bg-red-50 p-2">
-                            <p className="text-xs text-red-700">{commitResult.error}</p>
-                            {commitResult.failedIssueId && (
-                              <p className="text-xs text-red-500 mt-0.5">Issue ID: {commitResult.failedIssueId}</p>
-                            )}
-                          </div>
-                        ) : reviewRun?.status === "committed" ? null : (
-                          <button
-                            onClick={() => handleCommit(reviewRunId!)}
-                            disabled={committing}
-                            className="mt-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
-                          >
-                            {committing ? "Committing..." : "Commit Approved Claims to Master Data"}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Durable Run Outcome panel — shown for committed runs */}
-                {reviewRun?.status === "committed" && (
-                  <RunOutcomePanel run={reviewRun} />
-                )}
-
-                {/* Bulk actions */}
-                {reviewProgress && reviewProgress.pendingCount > 0 && (
-                  <div className="flex items-center gap-2 mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                    <span className="text-xs font-medium text-gray-600 mr-2">Bulk actions:</span>
-                    <button
-                      onClick={() => handleBulkResolve('dismissed', 'warnings')}
-                      disabled={bulkResolving}
-                      className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-white disabled:opacity-50"
-                    >
-                      Dismiss all warnings
-                    </button>
-                    <button
-                      onClick={() => handleBulkResolve('rejected', 'errors')}
-                      disabled={bulkResolving}
-                      className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
-                    >
-                      Reject all errors
-                    </button>
-                    <button
-                      onClick={() => handleBulkResolve('approved', 'all')}
-                      disabled={bulkResolving}
-                      className="rounded border border-green-200 px-2 py-1 text-xs text-green-600 hover:bg-green-50 disabled:opacity-50"
-                    >
-                      Approve all pending
-                    </button>
-                    {bulkResolving && <span className="text-xs text-gray-400 ml-2">Processing...</span>}
-                  </div>
-                )}
-
-                {/* Issues table */}
-                {reviewIssues.length > 0 && (
-                  <div className="border border-gray-200 rounded-lg overflow-hidden">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="bg-gray-50 text-left text-gray-500 uppercase tracking-wider">
-                          <th className="w-5 px-1 py-2"></th>
-                          <th className="px-3 py-2">Code</th>
-                          <th className="px-3 py-2">Severity</th>
-                          <th className="px-3 py-2">Category</th>
-                          <th className="px-3 py-2">If Approved</th>
-                          <th className="px-3 py-2">Context</th>
-                          <th className="px-3 py-2">Status</th>
-                          <th className="px-3 py-2 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {reviewIssues.map((issue) => {
-                          const isExpanded = expandedIssueId === issue.id;
-                          return (
-                          <React.Fragment key={issue.id}>
-                          <tr
-                            className={`hover:bg-gray-50/50 cursor-pointer ${issue.resolution ? 'opacity-60' : ''} ${isExpanded ? 'bg-brennan-light/30' : ''}`}
-                            onClick={() => setExpandedIssueId(isExpanded ? null : issue.id)}
-                          >
-                            <td className="px-1 py-2 text-center text-gray-400">
-                              <svg className={`h-3.5 w-3.5 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-                              </svg>
-                            </td>
-                            <td className="px-3 py-2 font-mono font-medium">{issue.code}</td>
-                            <td className="px-3 py-2">
-                              <SeverityBadge severity={issue.severity} />
-                            </td>
-                            <td className="px-3 py-2 font-medium text-gray-700">{issue.category}</td>
-                            <td className="px-3 py-2 text-gray-500">
-                              <CommitConsequenceLabel issue={issue} />
-                            </td>
-                            <td className="px-3 py-2">
-                              <IssueContextLinks issue={issue} />
-                            </td>
-                            <td className="px-3 py-2">
-                              {issue.resolution ? (
-                                <ResolutionBadge resolution={issue.resolution} />
-                              ) : (
-                                <span className="text-gray-400 italic">pending</span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
-                              {issue.resolution ? (
-                                <span className="text-xs text-gray-400">
-                                  {issue.resolvedBy?.displayName || ''}
-                                </span>
-                              ) : (
-                                <div className="flex items-center justify-end gap-1">
-                                  <button
-                                    onClick={() => handleResolve(issue.id, 'approved')}
-                                    disabled={resolvingIssue === issue.id}
-                                    className="rounded bg-green-50 border border-green-200 px-2 py-0.5 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
-                                    title="Approve this claim line"
-                                  >
-                                    Approve
-                                  </button>
-                                  <button
-                                    onClick={() => handleResolve(issue.id, 'rejected')}
-                                    disabled={resolvingIssue === issue.id}
-                                    className="rounded bg-red-50 border border-red-200 px-2 py-0.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
-                                    title="Reject this claim line"
-                                  >
-                                    Reject
-                                  </button>
-                                  <button
-                                    onClick={() => handleResolve(issue.id, 'dismissed')}
-                                    disabled={resolvingIssue === issue.id}
-                                    className="rounded bg-gray-50 border border-gray-200 px-2 py-0.5 text-xs font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-50"
-                                    title="Dismiss — no action needed"
-                                  >
-                                    Dismiss
-                                  </button>
-                                  {resolvingIssue === issue.id && (
-                                    <span className="text-gray-400 ml-1">...</span>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                          {isExpanded && (
-                            <tr>
-                              <td colSpan={8} className="bg-gray-50/80 px-0 py-0">
-                                <IssueDetailPanel issue={issue} />
-                              </td>
-                            </tr>
-                          )}
-                          </React.Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {reviewIssues.length === 0 && !loadingReview && (
-                  <div className="text-center py-6">
-                    <p className="text-sm text-gray-500">No exceptions for this run.</p>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Reconciliation Runs Table */}
       <div className="rounded-xl border border-brennan-border bg-white shadow-sm">
@@ -1332,66 +1019,37 @@ export default function ReconciliationPageClient({
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-1">
                         {run.status === "staged" && (
-                          <button
-                            onClick={() => handleValidate(run.id)}
-                            disabled={validating === run.id}
-                            className="rounded bg-brennan-blue px-3 py-1 text-xs font-medium text-white hover:bg-brennan-blue/90 disabled:opacity-50"
+                          <a
+                            href={`/reconciliation/run/${run.id}`}
+                            className="rounded bg-brennan-blue px-3 py-1 text-xs font-medium text-white hover:bg-brennan-blue/90"
                           >
-                            {validating === run.id ? "Validating..." : "Validate"}
-                          </button>
+                            Validate
+                          </a>
                         )}
                         {run.status === "review" && (
-                          <>
-                            <button
-                              onClick={() => handleReview(run.id)}
-                              disabled={loadingReview}
-                              className="rounded bg-amber-50 border border-amber-200 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
-                            >
-                              Review
-                            </button>
-                            <button
-                              onClick={() => handleValidate(run.id)}
-                              disabled={validating === run.id}
-                              className="rounded border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                            >
-                              {validating === run.id ? "..." : "Re-validate"}
-                            </button>
-                          </>
+                          <a
+                            href={`/reconciliation/run/${run.id}`}
+                            className="rounded bg-amber-50 border border-amber-200 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100"
+                          >
+                            Review
+                          </a>
                         )}
                         {run.status === "reviewed" && (
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => handleCommit(run.id)}
-                              disabled={committing}
-                              className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
-                            >
-                              {committing ? "..." : "Commit"}
-                            </button>
-                            <button
-                              onClick={() => handleReopen(run.id)}
-                              disabled={reopening === run.id}
-                              className="rounded border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
-                            >
-                              {reopening === run.id ? "..." : "Reopen"}
-                            </button>
-                            <button
-                              onClick={() => handleReview(run.id)}
-                              disabled={loadingReview}
-                              className="rounded border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                            >
-                              View
-                            </button>
-                          </div>
+                          <a
+                            href={`/reconciliation/run/${run.id}`}
+                            className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700"
+                          >
+                            Commit
+                          </a>
                         )}
                         {run.status === "committed" && (
                           <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => handleReview(run.id)}
-                              disabled={loadingReview}
-                              className="rounded border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                            <a
+                              href={`/reconciliation/run/${run.id}`}
+                              className="rounded border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
                             >
                               View
-                            </button>
+                            </a>
                             <a
                               href={`/api/export/reconciliation-run/${run.id}`}
                               download
@@ -1410,6 +1068,15 @@ export default function ReconciliationPageClient({
           </div>
         )}
       </div>
+
+      {/* Inline Column Mapping Modal — shown when upload detects no mapping */}
+      {mappingDetection && (
+        <ColumnMappingModal
+          detection={mappingDetection}
+          onSaved={handleMappingSaved}
+          onCancel={() => setMappingDetection(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1435,6 +1102,7 @@ function formatDate(dateStr: string): string {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: "America/New_York",
   });
 }
 
@@ -1475,446 +1143,6 @@ function StatusBadge({ status }: { status: string }) {
  * Durable run outcome panel — shown when viewing a committed run.
  * Reads from the persisted commitSummary field, not ephemeral state.
  */
-function RunOutcomePanel({ run }: { run: ReconciliationRun }) {
-  const cs = run.commitSummary;
-  const hasDataChanges = cs && (cs.recordsCreated > 0 || cs.recordsSuperseded > 0 || cs.recordsUpdated > 0 || cs.itemsCreated > 0);
-
-  return (
-    <div className="mb-4 rounded-lg border border-green-200 bg-green-50/50 p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-          </svg>
-          <h3 className="text-sm font-bold text-green-800">Run Committed</h3>
-        </div>
-        {run.completedAt && (
-          <span className="text-xs text-green-600">
-            {formatDate(run.completedAt)}
-          </span>
-        )}
-      </div>
-
-      {/* Run context */}
-      <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4">
-        <div>
-          <span className="text-green-600">Distributor</span>
-          <p className="font-medium text-green-900">{run.distributor.code}</p>
-        </div>
-        <div>
-          <span className="text-green-600">Claim Period</span>
-          <p className="font-medium text-green-900">{formatPeriod(run.claimPeriodStart)}</p>
-        </div>
-        <div>
-          <span className="text-green-600">Total Claim Lines</span>
-          <p className="font-medium text-green-900">{run.totalClaimLines}</p>
-        </div>
-        <div>
-          <span className="text-green-600">Exceptions</span>
-          <p className="font-medium text-green-900">{run.exceptionCount}</p>
-        </div>
-      </div>
-
-      {/* Resolution breakdown */}
-      {cs && (
-        <div className="mt-3 border-t border-green-200 pt-3">
-          <p className="text-xs font-medium text-green-800 mb-2">Resolution Summary</p>
-          <div className="flex flex-wrap gap-3 text-xs">
-            {cs.totalApproved > 0 && (
-              <span className="inline-flex items-center gap-1">
-                <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-                <span className="text-green-800 font-medium">{cs.totalApproved} approved</span>
-              </span>
-            )}
-            {cs.rejected > 0 && (
-              <span className="inline-flex items-center gap-1">
-                <span className="inline-block h-2 w-2 rounded-full bg-red-400" />
-                <span className="text-red-700 font-medium">{cs.rejected} rejected</span>
-              </span>
-            )}
-            {cs.dismissed > 0 && (
-              <span className="inline-flex items-center gap-1">
-                <span className="inline-block h-2 w-2 rounded-full bg-gray-400" />
-                <span className="text-gray-600 font-medium">{cs.dismissed} dismissed</span>
-              </span>
-            )}
-            {cs.deferred > 0 && (
-              <span className="inline-flex items-center gap-1">
-                <span className="inline-block h-2 w-2 rounded-full bg-amber-400" />
-                <span className="text-amber-700 font-medium">{cs.deferred} deferred</span>
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Master data changes */}
-      {hasDataChanges && (
-        <div className="mt-3 border-t border-green-200 pt-3">
-          <p className="text-xs font-medium text-green-800 mb-2">Master Data Changes</p>
-          <div className="flex flex-wrap gap-3 text-xs">
-            {cs.recordsCreated > 0 && (
-              <span className="rounded bg-green-100 px-2 py-0.5 font-medium text-green-800">
-                {cs.recordsCreated} record{cs.recordsCreated !== 1 ? "s" : ""} created
-              </span>
-            )}
-            {cs.recordsSuperseded > 0 && (
-              <span className="rounded bg-orange-100 px-2 py-0.5 font-medium text-orange-800">
-                {cs.recordsSuperseded} superseded
-              </span>
-            )}
-            {cs.recordsUpdated > 0 && (
-              <span className="rounded bg-blue-100 px-2 py-0.5 font-medium text-blue-800">
-                {cs.recordsUpdated} updated
-              </span>
-            )}
-            {cs.itemsCreated > 0 && (
-              <span className="rounded bg-purple-100 px-2 py-0.5 font-medium text-purple-800">
-                {cs.itemsCreated} item{cs.itemsCreated !== 1 ? "s" : ""} created
-              </span>
-            )}
-            {cs.confirmed > 0 && (
-              <span className="rounded bg-gray-100 px-2 py-0.5 font-medium text-gray-700">
-                {cs.confirmed} confirmed (no change)
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* No monetary totals — approvedAmount/rejectedAmount are not yet populated */}
-    </div>
-  );
-}
-
-/**
- * Renders contextual deep links for a reconciliation issue.
- * Links to the relevant contract detail page and/or records workspace.
- */
-// ---------------------------------------------------------------------------
-// Commit consequence label — tells the reviewer what approving will do
-// ---------------------------------------------------------------------------
-function CommitConsequenceLabel({ issue }: { issue: DbIssue }) {
-  const sd = issue.suggestedData;
-  const code = issue.code;
-
-  if (code === "CLM-001") {
-    const oldPrice = sd?.oldPrice as number | undefined;
-    const newPrice = sd?.newPrice as number | undefined;
-    if (oldPrice != null && newPrice != null) {
-      return (
-        <span className="text-amber-700">
-          Update price ${oldPrice.toFixed(2)} → ${newPrice.toFixed(2)}
-        </span>
-      );
-    }
-    return <span className="text-amber-700">Update master record price</span>;
-  }
-
-  if (code === "CLM-003") {
-    return <span className="text-blue-700">Add item to contract plan</span>;
-  }
-
-  if (code === "CLM-004") {
-    return <span className="text-red-700">Contract not found — manual review</span>;
-  }
-
-  if (code === "CLM-006") {
-    return <span className="text-blue-700">Create new item + record</span>;
-  }
-
-  if (code === "CLM-005") {
-    return <span className="text-amber-700">Ambiguous match — pick plan</span>;
-  }
-
-  if (code === "CLM-007") {
-    return <span className="text-red-700">Contract date issue — reject likely</span>;
-  }
-
-  if (code === "CLM-009") {
-    return <span className="text-gray-500">Possible duplicate — dismiss or reject</span>;
-  }
-
-  // CLM-002, CLM-008, CLM-010, CLM-011, CLM-012 — informational
-  if (issue.severity === "warning") {
-    return <span className="text-gray-500">Informational — no master data change</span>;
-  }
-
-  return <span className="text-gray-400">—</span>;
-}
-
-// ---------------------------------------------------------------------------
-// Expandable issue detail panel — shows claim row + master data context
-// ---------------------------------------------------------------------------
-function IssueDetailPanel({ issue }: { issue: DbIssue }) {
-  const sd = issue.suggestedData;
-  const cr = issue.claimRow;
-
-  return (
-    <div className="px-8 py-3 space-y-3 border-t border-gray-200">
-      {/* Description */}
-      <p className="text-xs text-gray-600">{issue.description}</p>
-
-      <div className="grid grid-cols-2 gap-4">
-        {/* Left: Claim row data */}
-        <div>
-          <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Claim Data</h4>
-          {cr ? (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-              <DetailField label="Row" value={`#${cr.rowNumber}`} />
-              <DetailField label="Contract" value={cr.contractNumber} />
-              <DetailField label="Plan Code" value={cr.planCode} />
-              <DetailField label="Item" value={cr.itemNumber} />
-              <DetailField label="Claimed Price" value={cr.deviatedPrice != null ? `$${cr.deviatedPrice.toFixed(2)}` : null} />
-              <DetailField label="Quantity" value={cr.quantity != null ? String(cr.quantity) : null} />
-              {cr.claimedAmount != null && (
-                <DetailField label="Line Amount" value={`$${cr.claimedAmount.toFixed(2)}`} />
-              )}
-              {cr.transactionDate && (
-                <DetailField label="Trans. Date" value={new Date(cr.transactionDate).toLocaleDateString()} />
-              )}
-              {cr.endUserCode && (
-                <DetailField label="End User" value={`${cr.endUserCode}${cr.endUserName ? ` — ${cr.endUserName}` : ''}`} />
-              )}
-              {cr.distributorOrderNumber && (
-                <DetailField label="Order #" value={cr.distributorOrderNumber} />
-              )}
-            </dl>
-          ) : (
-            <p className="text-xs text-gray-400 italic">No claim row data available</p>
-          )}
-        </div>
-
-        {/* Right: Master data / comparison context (varies by issue type) */}
-        <div>
-          <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-            {issue.code === "CLM-001" ? "Price Comparison" :
-             issue.code === "CLM-003" ? "Contract Context" :
-             issue.code === "CLM-006" ? "Resolution Detail" :
-             "Master Data"}
-          </h4>
-          <IssueTypeDetail issue={issue} />
-        </div>
-      </div>
-
-      {/* Resolution note if present */}
-      {issue.resolutionNote && (
-        <div className="text-xs">
-          <span className="font-medium text-gray-500">Note: </span>
-          <span className="text-gray-600">{issue.resolutionNote}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DetailField({ label, value }: { label: string; value: string | null | undefined }) {
-  return (
-    <>
-      <dt className="text-gray-400 whitespace-nowrap">{label}</dt>
-      <dd className="text-gray-700 font-medium">{value || <span className="text-gray-300 font-normal">—</span>}</dd>
-    </>
-  );
-}
-
-// Issue-type-specific detail for the right column of the expanded panel
-function IssueTypeDetail({ issue }: { issue: DbIssue }) {
-  const sd = issue.suggestedData;
-
-  if (issue.code === "CLM-001" && sd) {
-    // Price mismatch: show side-by-side comparison
-    const oldPrice = sd.oldPrice as number | undefined;
-    const newPrice = sd.newPrice as number | undefined;
-    return (
-      <div className="space-y-2">
-        {oldPrice != null && newPrice != null && (
-          <div className="flex items-center gap-3">
-            <div className="rounded border border-gray-200 bg-white px-3 py-1.5 text-center">
-              <div className="text-[10px] text-gray-400 uppercase">Contract</div>
-              <div className="text-sm font-semibold text-gray-700">${oldPrice.toFixed(4)}</div>
-            </div>
-            <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
-            </svg>
-            <div className="rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-center">
-              <div className="text-[10px] text-amber-600 uppercase">Claimed</div>
-              <div className="text-sm font-semibold text-amber-700">${newPrice.toFixed(4)}</div>
-            </div>
-            <div className="text-xs text-gray-400">
-              diff ${Math.abs(newPrice - oldPrice).toFixed(4)}
-            </div>
-          </div>
-        )}
-        {issue.masterRecordId && (
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-            <DetailField label="Master Record" value={`#${issue.masterRecordId}`} />
-            {sd.planId != null && <DetailField label="Plan ID" value={`#${sd.planId}`} />}
-          </dl>
-        )}
-        <p className="text-xs text-amber-600">
-          If approved: {issue.masterRecordId ? 'supersede or update existing record at claimed price' : 'update contract price'}
-        </p>
-      </div>
-    );
-  }
-
-  if (issue.code === "CLM-003" && sd) {
-    // Item not in contract
-    const candidatePlanIds = sd.candidatePlanIds as number[] | undefined;
-    return (
-      <div className="space-y-1.5">
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-          {sd.contractId != null && <DetailField label="Contract ID" value={`#${sd.contractId}`} />}
-          {sd.itemId != null && <DetailField label="Item ID" value={`#${sd.itemId}`} />}
-          {sd.planId != null && <DetailField label="Target Plan" value={`#${sd.planId}`} />}
-          {sd.claimedPrice != null && <DetailField label="Claimed Price" value={`$${(sd.claimedPrice as number).toFixed(4)}`} />}
-          {candidatePlanIds && candidatePlanIds.length > 1 && (
-            <DetailField label="Available Plans" value={candidatePlanIds.map(id => `#${id}`).join(', ')} />
-          )}
-        </dl>
-        <p className="text-xs text-blue-600">
-          If approved: create new rebate record under {sd.planId != null ? `plan #${sd.planId}` : 'contract plan'} at claimed price
-        </p>
-      </div>
-    );
-  }
-
-  if (issue.code === "CLM-006" && sd) {
-    // Unknown item
-    return (
-      <div className="space-y-1.5">
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-          <DetailField label="Item Number" value={sd.itemNumber as string | undefined} />
-          {sd.contractNumber != null && <DetailField label="Contract" value={String(sd.contractNumber)} />}
-          {sd.claimedPrice != null && <DetailField label="Claimed Price" value={`$${(sd.claimedPrice as number).toFixed(4)}`} />}
-        </dl>
-        <p className="text-xs text-blue-600">
-          If approved: create new item &quot;{String(sd.itemNumber)}&quot; + rebate record at claimed price
-        </p>
-      </div>
-    );
-  }
-
-  if (issue.code === "CLM-004" && sd) {
-    // Contract not found
-    return (
-      <div className="space-y-1.5">
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-          <DetailField label="Searched For" value={sd.contractNumber as string | undefined} />
-        </dl>
-        <p className="text-xs text-red-600">
-          No matching contract found for this distributor. Verify the contract number or create the contract first.
-        </p>
-      </div>
-    );
-  }
-
-  if (issue.code === "CLM-005" && sd) {
-    // Ambiguous plan match
-    const candidateIds = sd.candidateRecordIds as number[] | undefined;
-    return (
-      <div className="space-y-1.5">
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-          {sd.contractId != null && <DetailField label="Contract ID" value={`#${sd.contractId}`} />}
-          {candidateIds && <DetailField label="Candidate Records" value={candidateIds.map(id => `#${id}`).join(', ')} />}
-        </dl>
-        <p className="text-xs text-amber-600">
-          Multiple plan/price matches found. Review and resolve manually — may need to specify the correct plan.
-        </p>
-      </div>
-    );
-  }
-
-  if (issue.code === "CLM-007") {
-    // Contract expired / not yet effective
-    return (
-      <div>
-        <p className="text-xs text-red-600">
-          Transaction date falls outside the contract&apos;s effective period. Typically rejected unless the contract dates need correction.
-        </p>
-      </div>
-    );
-  }
-
-  // Default for informational issues (CLM-002, CLM-008, CLM-009, CLM-010-012)
-  if (issue.masterRecordId) {
-    return (
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-        <DetailField label="Master Record" value={`#${issue.masterRecordId}`} />
-        {issue.committedRecordId && issue.committedRecordId !== issue.masterRecordId && (
-          <DetailField label="Committed Record" value={`#${issue.committedRecordId}`} />
-        )}
-      </dl>
-    );
-  }
-
-  return <p className="text-xs text-gray-400 italic">No additional context for this issue type</p>;
-}
-
-function IssueContextLinks({ issue }: { issue: DbIssue }) {
-  const sd = issue.suggestedData;
-  const contractId = sd?.contractId as number | null | undefined;
-  const contractNumber = sd?.contractNumber as string | null | undefined;
-
-  const links: { label: string; href: string; title: string }[] = [];
-
-  // Link to contract detail page
-  if (contractId) {
-    links.push({
-      label: "Contract",
-      href: `/contracts/${contractId}`,
-      title: `View contract ${contractNumber || contractId}`,
-    });
-  } else if (issue.code === "CLM-004" && contractNumber) {
-    // Contract not found — link to contracts search
-    links.push({
-      label: "Search",
-      href: `/contracts?search=${encodeURIComponent(contractNumber)}`,
-      title: `Search for contract "${contractNumber}"`,
-    });
-  }
-
-  // Link to the matched master record (existing record found during validation)
-  if (issue.masterRecordId) {
-    links.push({
-      label: "Record",
-      href: `/records/${issue.masterRecordId}`,
-      title: `View matched record #${issue.masterRecordId}`,
-    });
-  }
-
-  // Link to the committed record (created/updated during commit)
-  if (issue.committedRecordId && issue.committedRecordId !== issue.masterRecordId) {
-    links.push({
-      label: "Committed",
-      href: `/records/${issue.committedRecordId}`,
-      title: `View committed record #${issue.committedRecordId}`,
-    });
-  }
-
-  if (links.length === 0) {
-    return <span className="text-gray-300">—</span>;
-  }
-
-  return (
-    <div className="flex items-center gap-1.5">
-      {links.map((link) => (
-        <a
-          key={link.label}
-          href={link.href}
-          title={link.title}
-          className="inline-flex items-center gap-0.5 rounded bg-brennan-blue/10 px-1.5 py-0.5 text-xs font-medium text-brennan-blue hover:bg-brennan-blue/20 transition-colors"
-        >
-          {link.label}
-          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-          </svg>
-        </a>
-      ))}
-    </div>
-  );
-}
-
 function SeverityBadge({ severity }: { severity: string }) {
   const colors: Record<string, string> = {
     error: "bg-red-100 text-red-700",
@@ -1989,20 +1217,6 @@ function QueueStatusBadge({ status }: { status: string }) {
   );
 }
 
-function ResolutionBadge({ resolution }: { resolution: string }) {
-  const colors: Record<string, string> = {
-    approved: "bg-green-100 text-green-700",
-    rejected: "bg-red-100 text-red-700",
-    adjusted: "bg-blue-100 text-blue-700",
-    deferred: "bg-yellow-100 text-yellow-700",
-    dismissed: "bg-gray-100 text-gray-500",
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[resolution] || colors.dismissed}`}>
-      {resolution}
-    </span>
-  );
-}
 
 function ShieldCheckIcon({ className }: { className?: string }) {
   return (

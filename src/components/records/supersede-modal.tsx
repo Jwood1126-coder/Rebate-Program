@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
 interface Warning {
@@ -44,6 +44,21 @@ export function SupersedeModal({ open, onClose, record, onSuccess }: SupersedeMo
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<{ field: string; message: string }[]>([]);
   const [pendingWarnings, setPendingWarnings] = useState<Warning[]>([]);
+
+  // Close on Escape key
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    },
+    [onClose],
+  );
+
+  useEffect(() => {
+    if (open) {
+      document.addEventListener("keydown", handleKeyDown);
+      return () => document.removeEventListener("keydown", handleKeyDown);
+    }
+  }, [open, handleKeyDown]);
 
   if (!open) return null;
 
@@ -104,13 +119,13 @@ export function SupersedeModal({ open, onClose, record, onSuccess }: SupersedeMo
   const inputCls = "w-full rounded-lg border border-brennan-border px-3 py-2 text-sm text-brennan-text focus:border-brennan-blue focus:outline-none focus:ring-1 focus:ring-brennan-blue";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="supersede-modal-title">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
       <div className="relative w-full max-w-lg rounded-xl bg-white shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-brennan-border px-5 py-3.5">
-          <h2 className="text-base font-bold text-brennan-text">Supersede Record</h2>
+          <h2 id="supersede-modal-title" className="text-base font-bold text-brennan-text">Supersede Record</h2>
           <button
             onClick={onClose}
             className="rounded p-1 text-gray-400 hover:bg-brennan-light hover:text-gray-600"

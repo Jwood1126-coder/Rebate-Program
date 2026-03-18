@@ -163,6 +163,20 @@ export const EXCEPTION_CODES = {
 export type ExceptionCode = typeof EXCEPTION_CODES[keyof typeof EXCEPTION_CODES];
 
 // ---------------------------------------------------------------------------
+// Price tolerance constants
+//
+// PRICE_MATCH_TOLERANCE: used when comparing a single claimed price against
+// the contract price (CLM-001) or POS price (CLM-012). $0.01 accounts for
+// minor rounding in unit prices.
+//
+// ARITHMETIC_TOLERANCE: used when checking that claimedAmount ≈
+// (standardPrice - deviatedPrice) × quantity. $0.02 because multiplication
+// can compound small per-unit rounding differences.
+// ---------------------------------------------------------------------------
+export const PRICE_MATCH_TOLERANCE = 0.01;
+export const ARITHMETIC_TOLERANCE = 0.02;
+
+// ---------------------------------------------------------------------------
 // Reconciliation run statuses
 // ---------------------------------------------------------------------------
 export const RUN_STATUSES = {
@@ -182,3 +196,74 @@ export const CLAIM_BATCH_STATUSES = {
   STAGED: 'staged',
   ERROR: 'error',
 } as const;
+
+// ---------------------------------------------------------------------------
+// UI-facing reconciliation types — used by review panel, run workflow, etc.
+// ---------------------------------------------------------------------------
+
+export interface ClaimRowData {
+  rowNumber: number;
+  contractNumber: string | null;
+  planCode: string | null;
+  itemNumber: string | null;
+  deviatedPrice: number | null;
+  quantity: number | null;
+  claimedAmount: number | null;
+  transactionDate: string | null;
+  endUserCode: string | null;
+  endUserName: string | null;
+  distributorOrderNumber: string | null;
+  matchedRecordId: number | null;
+}
+
+export interface DbIssue {
+  id: number;
+  reconciliationRunId: number;
+  code: string;
+  severity: string;
+  category: string;
+  description: string;
+  claimRowId: number | null;
+  masterRecordId: number | null;
+  committedRecordId: number | null;
+  suggestedAction: string;
+  suggestedData: Record<string, unknown> | null;
+  resolution: string | null;
+  resolutionNote: string | null;
+  resolvedById: number | null;
+  resolvedAt: string | null;
+  resolvedBy: { displayName: string } | null;
+  claimRow: ClaimRowData | null;
+}
+
+export interface RunProgress {
+  totalIssues: number;
+  resolvedCount: number;
+  pendingCount: number;
+  allResolved: boolean;
+  breakdown: Record<string, number>;
+}
+
+export interface CommitSummaryData {
+  totalApproved: number;
+  recordsCreated: number;
+  recordsSuperseded: number;
+  recordsUpdated: number;
+  itemsCreated: number;
+  confirmed: number;
+  rejected: number;
+  dismissed: number;
+  deferred: number;
+}
+
+export interface ReconciliationRunSummary {
+  id: number;
+  status: string;
+  totalClaimLines: number;
+  exceptionCount: number;
+  claimPeriodStart: string;
+  claimPeriodEnd: string;
+  completedAt: string | null;
+  commitSummary: CommitSummaryData | null;
+  distributor: { code: string; name: string };
+}

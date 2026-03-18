@@ -66,14 +66,13 @@ interface ImportResult {
 }
 
 type Mode = "upload" | "manual";
-type Step = 1 | 2 | 3 | 4 | 5;
+type Step = 1 | 2 | 3 | 4;
 
 const STEPS: { num: Step; label: string }[] = [
   { num: 1, label: "Distributor & End User" },
   { num: 2, label: "Contract Details" },
-  { num: 3, label: "Rebate Plan" },
-  { num: 4, label: "Line Items" },
-  { num: 5, label: "Review & Submit" },
+  { num: 3, label: "Line Items" },
+  { num: 4, label: "Review & Submit" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -156,6 +155,7 @@ function UploadMode({
 }) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
 
   // Context fields (set once, apply to all items)
   const [distributorId, setDistributorId] = useState<string>("");
@@ -164,11 +164,11 @@ function UploadMode({
   const [newEndUserName, setNewEndUserName] = useState("");
   const [creatingEndUser, setCreatingEndUser] = useState(false);
   const [localEndUsers, setLocalEndUsers] = useState(initialEndUsers);
+  const [contractType, setContractType] = useState<"fixed_term" | "evergreen">("fixed_term");
+  const [noticePeriodDays, setNoticePeriodDays] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [planCode, setPlanCode] = useState("");
-  const [planName, setPlanName] = useState("");
-  const [discountType, setDiscountType] = useState("part");
+  const [customerNumber, setCustomerNumber] = useState("");
   const [description, setDescription] = useState("");
 
   // File + result state
@@ -191,18 +191,25 @@ function UploadMode({
   const selectedEndUser = localEndUsers.find(u => u.id === Number(endUserId));
 
   const hasColumnMapping = !!itemNumberColumn && !!priceColumn && itemNumberColumn !== priceColumn;
-  const canPreview = !!selectedFile && !!distributorId && !!endUserId && !!startDate && !!planCode.trim() && hasColumnMapping;
+  const endDateRequired = contractType === "fixed_term";
+  const canPreview = !!selectedFile && !!distributorId && !!endUserId && !!startDate && hasColumnMapping
+    && (!endDateRequired || !!endDate);
 
   function buildFormData(): FormData {
     const fd = new FormData();
     fd.append("file", selectedFile!);
     fd.append("distributorId", distributorId);
     fd.append("endUserId", endUserId);
+    if (customerNumber.trim()) fd.append("customerNumber", customerNumber.trim());
+    fd.append("contractType", contractType);
+    if (contractType === "evergreen" && noticePeriodDays) {
+      fd.append("noticePeriodDays", noticePeriodDays);
+    }
     fd.append("startDate", startDate);
     if (endDate) fd.append("endDate", endDate);
-    fd.append("planCode", planCode.trim());
-    if (planName.trim()) fd.append("planName", planName.trim());
-    fd.append("discountType", discountType);
+    // Plan is auto-created behind the scenes — users don't manage plans
+    fd.append("planCode", "DEFAULT");
+    fd.append("discountType", "part");
     if (description.trim()) fd.append("description", description.trim());
     // Column mapping (user-confirmed)
     if (itemNumberColumn) fd.append("itemNumberColumn", itemNumberColumn);
@@ -287,6 +294,7 @@ function UploadMode({
         setError(data.errors.join("; "));
       } else {
         setPreview(data);
+        setTimeout(() => previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
       }
     } catch {
       setError("Network error. Please try again.");
@@ -325,9 +333,7 @@ function UploadMode({
     setEndUserId("");
     setStartDate("");
     setEndDate("");
-    setPlanCode("");
-    setPlanName("");
-    setDiscountType("part");
+    setCustomerNumber("");
     setDescription("");
     setError(null);
     setFileHeaders(null);
@@ -355,7 +361,7 @@ function UploadMode({
             <span className="font-medium">{selectedEndUser?.name}</span>
           </p>
           <p><span className="font-medium">{commitResult.recordsCreated}</span> line item{commitResult.recordsCreated !== 1 ? "s" : ""} created</p>
-          <p className="text-xs text-gray-400">Plan: {planCode} · Dates: {startDate} — {endDate || "Open"}</p>
+          <p className="text-xs text-gray-400">Dates: {startDate} — {endDate || "Open"}{customerNumber ? ` · Customer #${customerNumber}` : ""}</p>
         </div>
         {commitResult.warnings.length > 0 && (
           <div className="text-left max-w-md mx-auto">
@@ -429,7 +435,27 @@ function UploadMode({
             </div>
           </div>
 
-          {/* Row 2: Dates */}
+          {/* Row 2: Contract Type */}
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Contract Type <span className="text-red-500">*</span></label>
+              <select value={contractType} onChange={e => { setContractType(e.target.value as "fixed_term" | "evergreen"); setPreview(null); if (e.target.value === "evergreen") setEndDate(""); }}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue">
+                <option value="fixed_term">Fixed Term</option>
+                <option value="evergreen">Evergreen</option>
+              </select>
+            </div>
+            {contractType === "evergreen" && (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Notice Period (days)</label>
+                <input type="number" min="0" value={noticePeriodDays} onChange={e => setNoticePeriodDays(e.target.value)} placeholder="e.g. 30"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
+                <p className="mt-1 text-xs text-gray-400">Termination notice requirement</p>
+              </div>
+            )}
+          </div>
+
+          {/* Row 3: Dates */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Contract Start Date <span className="text-red-500">*</span></label>
@@ -437,40 +463,32 @@ function UploadMode({
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Contract End Date</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Contract End Date {endDateRequired && <span className="text-red-500">*</span>}
+              </label>
               <input type="date" value={endDate} onChange={e => { setEndDate(e.target.value); setPreview(null); }}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
-              <p className="mt-1 text-xs text-gray-400">Leave blank for open-ended</p>
+              {contractType === "evergreen" ? (
+                <p className="mt-1 text-xs text-teal-600">Evergreen — end date optional</p>
+              ) : (
+                <p className="mt-1 text-xs text-gray-400">Required for fixed-term contracts</p>
+              )}
             </div>
           </div>
 
-          {/* Row 3: Plan + Discount Type */}
-          <div className="grid grid-cols-3 gap-4">
+          {/* Row 3: Customer # + Description */}
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Plan Code <span className="text-red-500">*</span></label>
-              <input value={planCode} onChange={e => { setPlanCode(e.target.value.toUpperCase()); setPreview(null); }} placeholder="e.g. OSW"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
+              <label className="block text-xs font-medium text-gray-600 mb-1">Customer #</label>
+              <input value={customerNumber} onChange={e => setCustomerNumber(e.target.value)} placeholder="e.g. 12345"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
+              <p className="mt-1 text-xs text-gray-400">Distributor location/branch account number</p>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Plan Name</label>
-              <input value={planName} onChange={e => setPlanName(e.target.value)} placeholder="e.g. OSW Product Line"
+              <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
+              <input value={description} onChange={e => setDescription(e.target.value)} placeholder="e.g. OSW products for Link-Belt"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Discount Type</label>
-              <select value={discountType} onChange={e => setDiscountType(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue">
-                <option value="part">Part</option>
-                <option value="product_code">Product Code</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Optional description */}
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
-            <input value={description} onChange={e => setDescription(e.target.value)} placeholder="e.g. OSW products for Link-Belt"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
           </div>
         </div>
       </div>
@@ -490,7 +508,7 @@ function UploadMode({
               ref={fileInputRef}
               type="file"
               accept=".xlsx,.xls,.csv"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const file = e.target.files?.[0] || null;
                 setSelectedFile(file);
                 setPreview(null);
@@ -498,22 +516,55 @@ function UploadMode({
                 setFileHeaders(null);
                 setItemNumberColumn("");
                 setPriceColumn("");
+                // Auto-read headers on file select
+                if (file) {
+                  setReadingHeaders(true);
+                  const fd = new FormData();
+                  fd.append("file", file);
+                  try {
+                    const res = await fetch("/api/contracts/import?headers=true", {
+                      method: "POST",
+                      body: fd,
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                      setError(data.error || "Failed to read file headers");
+                    } else {
+                      setFileHeaders(data.headers);
+                      setSampleRows(data.sampleRows || []);
+                      setFileRowCount(data.rowCount || 0);
+                      setItemNumberColumn(data.suggestedMapping?.itemNumberColumn || "");
+                      setPriceColumn(data.suggestedMapping?.priceColumn || "");
+                    }
+                  } catch {
+                    setError("Network error reading file.");
+                  } finally {
+                    setReadingHeaders(false);
+                  }
+                }
               }}
               className="block w-full text-sm text-gray-500 file:mr-4 file:rounded-lg file:border-0 file:bg-brennan-light file:px-4 file:py-2 file:text-sm file:font-medium file:text-brennan-blue hover:file:bg-brennan-light/80"
             />
-            {selectedFile && !fileHeaders && (
-              <p className="mt-1 text-xs text-gray-400">
-                {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
-              </p>
+            {selectedFile && !fileHeaders && readingHeaders && (
+              <p className="mt-1 text-xs text-gray-400">Reading {selectedFile.name}...</p>
             )}
           </div>
-          {selectedFile && !fileHeaders && (
+          {selectedFile && (
             <button
-              onClick={handleReadHeaders}
-              disabled={readingHeaders}
-              className="rounded-lg bg-brennan-blue px-4 py-2 text-sm font-medium text-white hover:bg-brennan-blue/90 disabled:opacity-50"
+              onClick={() => {
+                setSelectedFile(null);
+                setFileHeaders(null);
+                setItemNumberColumn("");
+                setPriceColumn("");
+                setPreview(null);
+                setSampleRows([]);
+                setFileRowCount(0);
+                setError(null);
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
             >
-              {readingHeaders ? "Reading..." : "Read File"}
+              Clear
             </button>
           )}
         </div>
@@ -622,7 +673,7 @@ function UploadMode({
 
       {/* Preview */}
       {preview && preview.preview && preview.preview.length > 0 && (
-        <div className="rounded-xl border border-brennan-border bg-white shadow-sm">
+        <div ref={previewRef} className="rounded-xl border border-brennan-border bg-white shadow-sm">
           <div className="border-b border-brennan-border px-5 py-3 flex items-center justify-between">
             <div>
               <h2 className="text-base font-semibold text-brennan-text">Preview</h2>
@@ -666,7 +717,7 @@ function UploadMode({
                   <span className="text-gray-400">→</span>
                   <span className="font-medium">{group.endUserName}</span>
                   <span className="text-gray-400 text-xs">
-                    Contract #{group.contractNumber} · Plan: {group.planCode} · {group.startDate} — {group.endDate || "Open"}
+                    Contract #{group.contractNumber} · {group.startDate} — {group.endDate || "Open"}
                   </span>
                 </div>
                 <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -729,13 +780,11 @@ function ManualMode({
   // Step 2
   const [contractNumber, setContractNumber] = useState("(auto-generated)");
   const [contractDescription, setContractDescription] = useState("");
+  const [manualContractType, setManualContractType] = useState<"fixed_term" | "evergreen">("fixed_term");
+  const [manualNoticePeriodDays, setManualNoticePeriodDays] = useState("");
+  const [manualCustomerNumber, setManualCustomerNumber] = useState("");
   const [contractStartDate, setContractStartDate] = useState("");
   const [contractEndDate, setContractEndDate] = useState("");
-
-  // Step 3
-  const [planCode, setPlanCode] = useState("");
-  const [planName, setPlanName] = useState("");
-  const [discountType, setDiscountType] = useState("part");
 
   // Step 4
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
@@ -832,7 +881,11 @@ function ManualMode({
           distributorId: Number(distributorId),
           endUserId: Number(endUserId),
           contractNumber: "auto",
+          customerNumber: manualCustomerNumber.trim() || null,
           description: contractDescription.trim() || null,
+          contractType: manualContractType,
+          noticePeriodDays: manualContractType === "evergreen" && manualNoticePeriodDays
+            ? Number(manualNoticePeriodDays) : null,
           startDate: contractStartDate || null,
           endDate: contractEndDate || null,
         }),
@@ -850,7 +903,7 @@ function ManualMode({
       const planRes = await fetch("/api/plans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contractId: contractData.id, planCode: planCode.trim(), planName: planName.trim() || null, discountType }),
+        body: JSON.stringify({ contractId: contractData.id, planCode: "DEFAULT", planName: null, discountType: "part" }),
       });
       const planData = await planRes.json();
       if (!planRes.ok) {
@@ -880,7 +933,7 @@ function ManualMode({
       if (failedItems > 0) {
         setError(`Contract created but ${failedItems} line items failed.`);
       }
-      setStep(5);
+      setStep(4);
     } catch {
       setError("Network error. Please try again.");
     } finally {
@@ -891,9 +944,8 @@ function ManualMode({
   function canProceed(): boolean {
     switch (step) {
       case 1: return !!distributorId && !!endUserId;
-      case 2: return true; // contract number is auto-generated
-      case 3: return !!planCode.trim() && !!discountType;
-      case 4: return lineItems.length > 0;
+      case 2: return manualContractType === "evergreen" || !!contractEndDate;
+      case 3: return lineItems.length > 0;
       default: return true;
     }
   }
@@ -998,52 +1050,50 @@ function ManualMode({
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
               </div>
               <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Customer #</label>
+                <input value={manualCustomerNumber} onChange={e => setManualCustomerNumber(e.target.value)} placeholder="e.g. 12345"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
+                <p className="mt-1 text-xs text-gray-400">Distributor location/branch account number</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Contract Type <span className="text-red-500">*</span></label>
+                <select value={manualContractType} onChange={e => { setManualContractType(e.target.value as "fixed_term" | "evergreen"); if (e.target.value === "evergreen") setContractEndDate(""); }}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue">
+                  <option value="fixed_term">Fixed Term</option>
+                  <option value="evergreen">Evergreen</option>
+                </select>
+              </div>
+              {manualContractType === "evergreen" && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Notice Period (days)</label>
+                  <input type="number" min="0" value={manualNoticePeriodDays} onChange={e => setManualNoticePeriodDays(e.target.value)} placeholder="e.g. 30"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
+                  <p className="mt-1 text-xs text-gray-400">Termination notice requirement</p>
+                </div>
+              )}
+              <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Start Date</label>
                 <input type="date" value={contractStartDate} onChange={e => setContractStartDate(e.target.value)}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">End Date</label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  End Date {manualContractType === "fixed_term" && <span className="text-red-500">*</span>}
+                </label>
                 <input type="date" value={contractEndDate} onChange={e => setContractEndDate(e.target.value)}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
-                <p className="mt-1 text-xs text-gray-400">Leave blank for open-ended</p>
+                {manualContractType === "evergreen" ? (
+                  <p className="mt-1 text-xs text-teal-600">Evergreen — end date optional</p>
+                ) : (
+                  <p className="mt-1 text-xs text-gray-400">Required for fixed-term contracts</p>
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {/* STEP 3 */}
+        {/* STEP 3: Line Items */}
         {step === 3 && (
-          <div className="p-6 space-y-5">
-            <div>
-              <h2 className="text-lg font-semibold text-brennan-text">Rebate Plan</h2>
-              <p className="text-sm text-gray-500 mt-1">A plan groups the line items under the contract</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Plan Code <span className="text-red-500">*</span></label>
-                <input value={planCode} onChange={e => setPlanCode(e.target.value.toUpperCase())} placeholder="e.g. OSW"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Plan Name</label>
-                <input value={planName} onChange={e => setPlanName(e.target.value)} placeholder="e.g. OSW Product Line"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Discount Type <span className="text-red-500">*</span></label>
-                <select value={discountType} onChange={e => setDiscountType(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue">
-                  <option value="part">Part (per individual part number)</option>
-                  <option value="product_code">Product Code (group discount)</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 4 */}
-        {step === 4 && (
           <div className="p-6 space-y-5">
             <div className="flex items-center justify-between">
               <div>
@@ -1141,8 +1191,8 @@ function ManualMode({
           </div>
         )}
 
-        {/* STEP 5 */}
-        {step === 5 && (
+        {/* STEP 4: Review & Submit */}
+        {step === 4 && (
           <div className="p-6 space-y-5">
             {createdContractId ? (
               <div className="text-center py-6 space-y-4">
@@ -1154,7 +1204,6 @@ function ManualMode({
                 <h2 className="text-lg font-semibold text-brennan-text">Contract Created Successfully</h2>
                 <div className="text-sm text-gray-600 space-y-1">
                   <p><span className="font-medium">Contract:</span> {contractNumber} ({selectedDistributor?.code} → {selectedEndUser?.name})</p>
-                  <p><span className="font-medium">Plan:</span> {planCode}{planName ? ` — ${planName}` : ""}</p>
                   <p><span className="font-medium">Line Items:</span> {lineItems.length} records created</p>
                 </div>
                 <div className="flex items-center justify-center gap-3 pt-4">
@@ -1183,9 +1232,7 @@ function ManualMode({
                   <div className="space-y-3">
                     <h3 className="text-sm font-medium text-gray-700 border-b border-gray-100 pb-1">Rebate Plan</h3>
                     <dl className="text-sm space-y-1">
-                      <div className="flex justify-between"><dt className="text-gray-500">Plan Code</dt><dd className="font-mono font-medium">{planCode}</dd></div>
-                      {planName && <div className="flex justify-between"><dt className="text-gray-500">Plan Name</dt><dd>{planName}</dd></div>}
-                      <div className="flex justify-between"><dt className="text-gray-500">Discount Type</dt><dd>{discountType}</dd></div>
+                      {manualCustomerNumber && <div className="flex justify-between"><dt className="text-gray-500">Customer #</dt><dd className="font-mono">{manualCustomerNumber}</dd></div>}
                     </dl>
                   </div>
                 </div>
@@ -1228,7 +1275,7 @@ function ManualMode({
             </button>
             <div className="flex items-center gap-3">
               <button onClick={() => router.push("/records")} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Cancel</button>
-              {step < 5 ? (
+              {step < 4 ? (
                 <button onClick={() => setStep((step + 1) as Step)} disabled={!canProceed()}
                   className="rounded-lg bg-brennan-blue px-4 py-2 text-sm font-medium text-white hover:bg-brennan-blue/90 disabled:opacity-50 disabled:cursor-not-allowed">
                   Next

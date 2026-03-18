@@ -97,8 +97,8 @@ function buildWhere(
     conditions.push({
       OR: [
         { item: { itemNumber: { contains: q, mode: "insensitive" } } },
-        { rebatePlan: { planCode: { contains: q, mode: "insensitive" } } },
         { rebatePlan: { contract: { contractNumber: { contains: q, mode: "insensitive" } } } },
+        { rebatePlan: { contract: { customerNumber: { contains: q, mode: "insensitive" } } } },
         { rebatePlan: { contract: { distributor: { code: { contains: q, mode: "insensitive" } } } } },
         { rebatePlan: { contract: { endUser: { name: { contains: q, mode: "insensitive" } } } } },
       ],
