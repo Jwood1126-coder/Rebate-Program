@@ -13,20 +13,22 @@ export interface RecordActions {
   canSupersede: boolean;
   canExpire: boolean;
   canCancel: boolean;
+  canRestore: boolean;
 }
 
 export function getAvailableActions(status: RecordStatus): RecordActions {
   switch (status) {
     case "active":
     case "future":
-      return { canEdit: true, canSupersede: true, canExpire: true, canCancel: true };
+      return { canEdit: true, canSupersede: true, canExpire: true, canCancel: true, canRestore: false };
     case "draft":
-      return { canEdit: true, canSupersede: false, canExpire: false, canCancel: true };
+      return { canEdit: true, canSupersede: false, canExpire: false, canCancel: true, canRestore: false };
     case "expired":
-      return { canEdit: false, canSupersede: true, canExpire: false, canCancel: false };
-    case "superseded":
+      return { canEdit: false, canSupersede: true, canExpire: false, canCancel: false, canRestore: false };
     case "cancelled":
+      return { canEdit: false, canSupersede: false, canExpire: false, canCancel: false, canRestore: true };
+    case "superseded":
     default:
-      return { canEdit: false, canSupersede: false, canExpire: false, canCancel: false };
+      return { canEdit: false, canSupersede: false, canExpire: false, canCancel: false, canRestore: false };
   }
 }

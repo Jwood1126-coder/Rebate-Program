@@ -74,7 +74,7 @@ function RecordsPageInner({
 
   // Confirmation dialog state (expire / cancel)
   const [confirmAction, setConfirmAction] = useState<{
-    type: "expire" | "cancel";
+    type: "expire" | "cancel" | "restore";
     record: RecordRow;
   } | null>(null);
 
@@ -191,8 +191,10 @@ function RecordsPageInner({
 
     const url = type === "expire"
       ? `/api/records/${record.id}/expire`
-      : `/api/records/${record.id}`;
-    const method = type === "expire" ? "POST" : "DELETE";
+      : type === "restore"
+        ? `/api/records/${record.id}/restore`
+        : `/api/records/${record.id}`;
+    const method = type === "cancel" ? "DELETE" : "POST";
 
     try {
       const res = await fetch(url, { method });
@@ -263,6 +265,7 @@ function RecordsPageInner({
     if (avail.canSupersede) actions.push({ label: "Supersede", onClick: () => setSupersedeRecord(r) });
     if (avail.canExpire) actions.push({ label: "Expire", onClick: () => setConfirmAction({ type: "expire", record: r }), danger: true });
     if (avail.canCancel) actions.push({ label: "Cancel", onClick: () => setConfirmAction({ type: "cancel", record: r }), danger: true });
+    if (avail.canRestore) actions.push({ label: "Restore", onClick: () => setConfirmAction({ type: "restore", record: r }) });
     // History is always available regardless of status
     actions.push({ label: "History", onClick: () => setHistoryRecordId(r.id) });
     return actions;
@@ -537,16 +540,26 @@ function RecordsPageInner({
         />
       )}
 
-      {/* Expire / Cancel confirmation */}
+      {/* Expire / Cancel / Restore confirmation */}
       {confirmAction && (
         <ConfirmDialog
-          title={confirmAction.type === "expire" ? "Expire Record" : "Cancel Record"}
+          title={
+            confirmAction.type === "expire" ? "Expire Record"
+              : confirmAction.type === "restore" ? "Restore Record"
+              : "Cancel Record"
+          }
           message={
             confirmAction.type === "expire"
               ? `This will set the end date of Record #${confirmAction.record.id} to today, making it expire immediately. This action can be undone by editing the end date.`
-              : `This will cancel Record #${confirmAction.record.id}. Cancelled records are preserved for audit but no longer count as active pricing. This cannot be undone.`
+              : confirmAction.type === "restore"
+                ? `This will restore Record #${confirmAction.record.id}. Its status will be re-derived from its dates.`
+                : `This will cancel Record #${confirmAction.record.id}. Cancelled records are preserved for audit but can be restored later.`
           }
-          confirmLabel={confirmAction.type === "expire" ? "Expire" : "Cancel Record"}
+          confirmLabel={
+            confirmAction.type === "expire" ? "Expire"
+              : confirmAction.type === "restore" ? "Restore"
+              : "Cancel Record"
+          }
           danger={confirmAction.type === "cancel"}
           onConfirm={handleConfirmAction}
           onCancel={() => setConfirmAction(null)}

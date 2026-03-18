@@ -87,7 +87,7 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
   const [approving, setApproving] = useState(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
 
-  async function handleApproval(action: "approve" | "reject") {
+  async function handleApproval(action: "approve" | "reject" | "revert") {
     setApproving(true);
     setApprovalError(null);
     try {
@@ -175,7 +175,7 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
           </div>
         </div>
 
-        {/* Approval banner */}
+        {/* Approval banner — pending review */}
         {contractStatus === "pending_review" && (
           <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 flex items-center justify-between">
             <div>
@@ -184,7 +184,7 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => handleApproval("reject")}
+                onClick={() => { if (confirm("Reject this contract? You can revert this later if needed.")) handleApproval("reject"); }}
                 disabled={approving}
                 className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
               >
@@ -198,6 +198,34 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
                 {approving ? "Processing..." : "Approve Contract"}
               </button>
             </div>
+          </div>
+        )}
+        {/* Revert banner — active (undo approval) */}
+        {contractStatus === "active" && (
+          <div className="mt-3 flex justify-end">
+            <button
+              onClick={() => { if (confirm("Revert this contract to pending review? It will need to be re-approved.")) handleApproval("revert"); }}
+              disabled={approving}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {approving ? "Processing..." : "Revert to Pending Review"}
+            </button>
+          </div>
+        )}
+        {/* Revert banner — cancelled (undo rejection) */}
+        {contractStatus === "cancelled" && (
+          <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-red-800">This contract was rejected</p>
+              <p className="text-xs text-red-600 mt-0.5">You can revert it to pending review if this was a mistake.</p>
+            </div>
+            <button
+              onClick={() => handleApproval("revert")}
+              disabled={approving}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {approving ? "Processing..." : "Revert to Pending Review"}
+            </button>
           </div>
         )}
         {approvalError && (

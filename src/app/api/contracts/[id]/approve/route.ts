@@ -8,10 +8,13 @@ import { CONTRACT_STATUSES } from "@/lib/constants/statuses";
 /**
  * POST /api/contracts/:id/approve
  *
- * Transitions a contract from pending_review → active (approve)
- * or pending_review → cancelled (reject).
+ * Transitions contract approval status:
+ *   pending_review → active  (approve)
+ *   pending_review → cancelled (reject)
+ *   active → pending_review  (revert — undo approval)
+ *   cancelled → pending_review (revert — undo rejection)
  *
- * Body: { action: "approve" | "reject", note?: string }
+ * Body: { action: "approve" | "reject" | "revert", note?: string }
  *
  * Approval is auditable. This endpoint is the natural future insertion
  * point for catalog validation (e.g., Catsy/PIMS verification) before
@@ -38,9 +41,9 @@ export async function POST(
   const body = await request.json();
   const action = body.action as string;
 
-  if (!action || !["approve", "reject"].includes(action)) {
+  if (!action || !["approve", "reject", "revert"].includes(action)) {
     return NextResponse.json(
-      { error: 'Invalid action. Must be "approve" or "reject".' },
+      { error: 'Invalid action. Must be "approve", "reject", or "revert".' },
       { status: 400 }
     );
   }
@@ -50,16 +53,29 @@ export async function POST(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  if (existing.status !== CONTRACT_STATUSES.PENDING_REVIEW) {
-    return NextResponse.json(
-      { error: `Contract is "${existing.status}", not pending review. Only pending_review contracts can be approved or rejected.` },
-      { status: 409 }
-    );
+  // Determine valid transitions
+  let newStatus: string;
+  if (action === "revert") {
+    // Revert: active or cancelled → pending_review
+    if (existing.status !== CONTRACT_STATUSES.ACTIVE && existing.status !== CONTRACT_STATUSES.CANCELLED) {
+      return NextResponse.json(
+        { error: `Cannot revert — contract is "${existing.status}". Only active or cancelled contracts can be reverted to pending review.` },
+        { status: 409 }
+      );
+    }
+    newStatus = CONTRACT_STATUSES.PENDING_REVIEW;
+  } else {
+    // Approve/reject: pending_review → active or cancelled
+    if (existing.status !== CONTRACT_STATUSES.PENDING_REVIEW) {
+      return NextResponse.json(
+        { error: `Contract is "${existing.status}", not pending review. Only pending_review contracts can be approved or rejected.` },
+        { status: 409 }
+      );
+    }
+    newStatus = action === "approve"
+      ? CONTRACT_STATUSES.ACTIVE
+      : CONTRACT_STATUSES.CANCELLED;
   }
-
-  const newStatus = action === "approve"
-    ? CONTRACT_STATUSES.ACTIVE
-    : CONTRACT_STATUSES.CANCELLED;
 
   const now = new Date();
   const updated = await prisma.contract.update({

@@ -81,7 +81,7 @@ export function RecordDetailClient({
   // Action modals
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [supersedeModalOpen, setSupersedeModalOpen] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<"expire" | "cancel" | null>(null);
+  const [confirmAction, setConfirmAction] = useState<"expire" | "cancel" | "restore" | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -94,8 +94,10 @@ export function RecordDetailClient({
 
     const url = confirmAction === "expire"
       ? `/api/records/${record.id}/expire`
-      : `/api/records/${record.id}`;
-    const method = confirmAction === "expire" ? "POST" : "DELETE";
+      : confirmAction === "restore"
+        ? `/api/records/${record.id}/restore`
+        : `/api/records/${record.id}`;
+    const method = confirmAction === "cancel" ? "DELETE" : "POST";
 
     try {
       const res = await fetch(url, { method });
@@ -208,6 +210,14 @@ export function RecordDetailClient({
                 className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
               >
                 Cancel
+              </button>
+            )}
+            {actions.canRestore && (
+              <button
+                onClick={() => setConfirmAction("restore")}
+                className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50"
+              >
+                Restore
               </button>
             )}
             <Link
@@ -476,12 +486,14 @@ export function RecordDetailClient({
           <div className="absolute inset-0 bg-black/40" onClick={() => { setConfirmAction(null); setActionError(null); }} />
           <div className="relative w-full max-w-sm rounded-xl bg-white p-5 shadow-2xl">
             <h3 className="text-base font-bold text-brennan-text">
-              {confirmAction === "expire" ? "Expire Record" : "Cancel Record"}
+              {confirmAction === "expire" ? "Expire Record" : confirmAction === "restore" ? "Restore Record" : "Cancel Record"}
             </h3>
             <p className="mt-2 text-sm text-gray-600">
               {confirmAction === "expire"
                 ? "This will set the end date to today, making this record expired. This action can be reversed by editing the record."
-                : "This will mark the record as cancelled. Cancelled records are preserved for audit history."}
+                : confirmAction === "restore"
+                  ? "This will restore the cancelled record. Its status will be re-derived from its dates (active, expired, or future)."
+                  : "This will mark the record as cancelled. Cancelled records are preserved for audit history and can be restored later."}
             </p>
             {actionError && (
               <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -498,11 +510,13 @@ export function RecordDetailClient({
               <button
                 onClick={handleConfirmAction}
                 disabled={actionLoading}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+                className={`rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50 ${
+                  confirmAction === "restore" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-600 hover:bg-red-700"
+                }`}
               >
                 {actionLoading
-                  ? (confirmAction === "expire" ? "Expiring..." : "Cancelling...")
-                  : (confirmAction === "expire" ? "Expire Record" : "Cancel Record")}
+                  ? (confirmAction === "expire" ? "Expiring..." : confirmAction === "restore" ? "Restoring..." : "Cancelling...")
+                  : (confirmAction === "expire" ? "Expire Record" : confirmAction === "restore" ? "Restore Record" : "Cancel Record")}
               </button>
             </div>
           </div>
