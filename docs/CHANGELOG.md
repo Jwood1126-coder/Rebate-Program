@@ -4,6 +4,50 @@ All notable changes to this project are documented in this file, grouped by sess
 
 ---
 
+## 2026-03-18 — Contract Updates, Approval Workflow, Reconciliation UX Split
+
+### Contract Update Management (Phases A–E)
+- Evergreen contract support: `contractType` (fixed_term|evergreen), `noticePeriodDays`, `lastReviewedAt`
+- Contract update diff engine: upload spreadsheet → match items → detect changed/added/removed
+- Review/approval UI at `/contracts/[id]/update/[runId]` with stepper
+- Commit service applies approved diffs (supersede, create, skip)
+- Ambiguous multi-plan matching protected server-side
+- Future-effective dates constrained to today-or-earlier
+- Contract activity timeline derived from audit + update runs + reconciliation
+- Contract dispute history panel scoped by (distributorId, contractNumber)
+
+### Contract Approval Workflow
+- New contracts start as `pending_review` instead of `active`
+- `POST /api/contracts/:id/approve` — approve → active, reject → cancelled
+- Amber approval banner on contract detail page with Approve/Reject buttons
+- Dashboard shows pending review count on Contracts metric card
+- VAL-017 warning when adding records to unapproved contracts
+
+### Customer # and Hidden Plans
+- `customerNumber` field on Contract (non-unique, per-distributor-location ID)
+- Plan codes hidden from new contract setup UX (auto-created default plan)
+- Multi-plan contracts retain Plan column for legacy visibility
+
+### Reconciliation UX Split (Phases R-A, R-B)
+- Extracted ReviewPanel (~700 lines) into `review-panel.tsx`
+- Shared types moved to `src/lib/reconciliation/types.ts`
+- New dedicated run workflow page at `/reconciliation/run/[id]` with 4-step stepper
+- Checklist actions now link to dedicated run page
+- Upload creates run then redirects to run workflow
+- Inline validation/review/commit panels removed from checklist page
+- `reconciliation-page-client.tsx`: 2,236 → 1,227 lines
+
+### UX Improvements
+- Contract wizard: auto-reads file on upload (no manual "Read" button), Clear button, auto-scroll to preview
+- "Update Pricing" renamed to "Update" / "Update Contract" across UI
+- Status labels use human-readable names (e.g., "Pending Review" not "pending_review")
+
+### Test Coverage
+- 314 tests across 18 files (up from 240/14)
+- New: contract-update (multiple), contract-approval (9), contract-activity (8), validation.service (38)
+
+---
+
 ## 2026-03-17 — Reconciliation Issue Review Enhancement
 
 ### Expandable Issue Detail Rows (New)
