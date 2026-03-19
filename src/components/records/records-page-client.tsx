@@ -426,13 +426,12 @@ function RecordsPageInner({
                   </button>
                 </td>
                 <td className="px-3 py-2">
-                  <button
-                    type="button"
-                    onClick={() => setEntityModal({ type: "contract", id: r.contractId })}
-                    className="text-sm font-medium text-brennan-text hover:text-brennan-blue hover:underline"
+                  <a
+                    href={`/contracts/${r.contractId}`}
+                    className="text-sm font-medium text-brennan-blue hover:underline"
                   >
                     {r.contractNumber}
-                  </button>
+                  </a>
                 </td>
                 <td className="px-3 py-2">
                   <button

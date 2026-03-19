@@ -9,6 +9,15 @@
 //   - Informational approvals → stamp committedRecordId, no master data writes.
 //   - Rejected/dismissed/deferred → no writes.
 //   - On failure: run stays "reviewed", all writes rolled back.
+//
+// Supersession chain semantics:
+//   When a record is superseded, its supersededById points to the replacement.
+//   Chains grow linearly: A → B → C, where each link is one supersession event.
+//   All queries that load "current" records filter by supersededById: null or
+//   status: { notIn: ['superseded'] } to exclude old links.
+//   If a record is already superseded (by a contract update that happened between
+//   validation and commit), the commit will reject that issue with a clear error
+//   rather than silently breaking the chain.
 
 import { prisma } from '@/lib/db/client';
 import { EXCEPTION_CODES } from './types';
@@ -22,10 +31,17 @@ type TxClient = Omit<
   '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
 >;
 
+export interface AffectedContract {
+  id: number;
+  contractNumber: string;
+  distributorName: string;
+}
+
 export interface CommitResult {
   success: boolean;
   error?: string;
   failedIssueId?: number;
+  affectedContracts?: AffectedContract[];
   summary: {
     totalApproved: number;
     recordsCreated: number;
@@ -107,7 +123,9 @@ export async function commitRun(runId: number, userId: number): Promise<CommitRe
       where: { id: runId },
       data: { status: 'committed', completedAt: new Date(), commitSummary: summary as unknown as Prisma.InputJsonValue },
     });
-    return { success: true, summary };
+    // Still update lastReviewedAt — the user reviewed all claims even if none were approved
+    const affectedContracts = await updateAffectedContracts(runId, run.distributorId);
+    return { success: true, affectedContracts, summary };
   }
 
   // --- Execute all writes inside a single transaction ---
@@ -139,6 +157,16 @@ export async function commitRun(runId: number, userId: number): Promise<CommitRe
           if (!oldRecord) {
             throw new CommitError(
               `CLM-001 issue ${issue.id}: master record ${issue.masterRecordId} not found`,
+              issue.id,
+            );
+          }
+
+          // Guard: if a contract update superseded this record between validation
+          // and commit, reject rather than silently break the supersession chain.
+          if (oldRecord.supersededById !== null) {
+            throw new CommitError(
+              `CLM-001 issue ${issue.id}: record ${issue.masterRecordId} was already superseded ` +
+              `(likely by a contract update). Please re-validate this run.`,
               issue.id,
             );
           }
@@ -431,8 +459,12 @@ export async function commitRun(runId: number, userId: number): Promise<CommitRe
       return { recordsCreated, recordsSuperseded, recordsUpdated, itemsCreated, confirmed };
     });
 
+    // --- Post-commit: update lastReviewedAt on affected contracts ---
+    const affectedContracts = await updateAffectedContracts(runId, run.distributorId);
+
     return {
       success: true,
+      affectedContracts,
       summary: {
         totalApproved: approved.length,
         ...txResult,
@@ -509,6 +541,61 @@ async function auditInTx(
       userId,
     },
   });
+}
+
+/**
+ * After a reconciliation commit, find which contracts were referenced by the
+ * run's claim rows and update their lastReviewedAt. This closes the loop
+ * between reconciliation and contract review — committing a reconciliation
+ * run IS a meaningful review of the contract data.
+ */
+async function updateAffectedContracts(
+  runId: number,
+  distributorId: number,
+): Promise<AffectedContract[]> {
+  // Find distinct contract numbers from this run's claim rows
+  const claimBatch = await prisma.claimBatch.findFirst({
+    where: { reconciliationRun: { id: runId } },
+    select: { id: true },
+  });
+
+  if (!claimBatch) return [];
+
+  const claimRows = await prisma.claimRow.findMany({
+    where: { batchId: claimBatch.id, contractNumber: { not: null } },
+    select: { contractNumber: true },
+    distinct: ['contractNumber'],
+  });
+
+  const contractNumbers = claimRows
+    .map(r => r.contractNumber)
+    .filter((n): n is string => n !== null);
+
+  if (contractNumbers.length === 0) return [];
+
+  // Find matching contracts for this distributor
+  const contracts = await prisma.contract.findMany({
+    where: {
+      distributorId,
+      contractNumber: { in: contractNumbers },
+    },
+    select: { id: true, contractNumber: true, distributor: { select: { name: true } } },
+  });
+
+  if (contracts.length === 0) return [];
+
+  // Update lastReviewedAt on all affected contracts
+  const now = new Date();
+  await prisma.contract.updateMany({
+    where: { id: { in: contracts.map(c => c.id) } },
+    data: { lastReviewedAt: now },
+  });
+
+  return contracts.map(c => ({
+    id: c.id,
+    contractNumber: c.contractNumber,
+    distributorName: c.distributor.name,
+  }));
 }
 
 // Re-export for use by consumers that check the type

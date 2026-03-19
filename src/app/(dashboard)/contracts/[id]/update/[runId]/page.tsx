@@ -42,6 +42,18 @@ export default async function ContractUpdateReviewPage({
     orderBy: { planCode: "asc" },
   });
 
+  // Load current contract records for full context
+  const currentRecords = await prisma.rebateRecord.findMany({
+    where: {
+      rebatePlan: { contractId, status: "active" },
+      status: { notIn: ["cancelled", "superseded"] },
+    },
+    include: {
+      item: { select: { itemNumber: true } },
+    },
+    orderBy: { item: { itemNumber: "asc" } },
+  });
+
   const serializedDiffs = run.diffs.map((d) => ({
     id: d.id,
     diffType: d.diffType,
@@ -58,6 +70,15 @@ export default async function ContractUpdateReviewPage({
     resolutionData: d.resolutionData as Record<string, unknown> | null,
     resolvedAt: d.resolvedAt?.toISOString() ?? null,
     committedRecordId: d.committedRecordId,
+  }));
+
+  const serializedRecords = currentRecords.map((r) => ({
+    id: r.id,
+    itemNumber: r.item.itemNumber,
+    rebatePrice: Number(r.rebatePrice),
+    startDate: r.startDate.toISOString().split("T")[0],
+    endDate: r.endDate?.toISOString().split("T")[0] ?? null,
+    status: r.status,
   }));
 
   return (
@@ -88,6 +109,7 @@ export default async function ContractUpdateReviewPage({
       }}
       diffs={serializedDiffs}
       plans={plans}
+      currentRecords={serializedRecords}
     />
   );
 }

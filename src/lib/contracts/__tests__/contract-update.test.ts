@@ -709,3 +709,65 @@ describe("plan hint correctness", () => {
     expect(result.removedCount).toBe(0);
   });
 });
+
+// ===========================================================================
+// Multi-round: repeated contract updates on the same contract
+// ===========================================================================
+
+describe("multi-round contract updates", () => {
+  beforeEach(resetAll);
+
+  it("second update diffs against post-supersession state (record B, not A)", async () => {
+    // After first update: A was superseded by B. B is the current record.
+    // The diff engine should only see B.
+    mockContract([{ id: 10, planCode: "DEFAULT" }]);
+    mockExistingRecords([
+      // B is the current record (A was superseded and filtered out by the query)
+      { id: 200, rebatePlanId: 10, itemId: 1, itemNumber: "PART-1", rebatePrice: 5.00, planCode: "DEFAULT" },
+    ]);
+    mockItems([{ id: 1, itemNumber: "PART-1" }]);
+    await mockXlsx([{ "Part Number": "PART-1", "Price": 6.00 }]);
+
+    const result = await stageContractUpdate(
+      Buffer.from("x"),
+      "update-round2.xlsx",
+      { ...baseInput, fileMode: "delta", columnMapping: { itemNumberColumn: "Part Number", priceColumn: "Price" } },
+      1
+    );
+
+    // Should detect price change: B ($5.00) → C ($6.00)
+    expect(result.changedCount).toBe(1);
+    expect(result.addedCount).toBe(0);
+    expect(result.unchangedCount).toBe(0);
+
+    // Verify the diff references B (id=200), not A
+    const diffData = mockPrisma._tx.contractUpdateDiff.createMany.mock.calls[0][0].data;
+    const changedDiff = diffData.find((d: Record<string, unknown>) => d.diffType === "changed");
+    expect(changedDiff.matchedRecordId).toBe(200);
+    expect(Number(changedDiff.oldPrice)).toBe(5.00);
+    expect(Number(changedDiff.newPrice)).toBe(6.00);
+  });
+
+  it("snapshot mode after prior update does not flag superseded records as removed", async () => {
+    // After first update: only B exists as current (A is superseded, excluded by query).
+    // Snapshot upload contains B — should be unchanged, nothing removed.
+    mockContract([{ id: 10, planCode: "DEFAULT" }]);
+    mockExistingRecords([
+      { id: 200, rebatePlanId: 10, itemId: 1, itemNumber: "PART-1", rebatePrice: 5.00, planCode: "DEFAULT" },
+    ]);
+    mockItems([{ id: 1, itemNumber: "PART-1" }]);
+    await mockXlsx([{ "Part Number": "PART-1", "Price": 5.00 }]);
+
+    const result = await stageContractUpdate(
+      Buffer.from("x"),
+      "snapshot-round2.xlsx",
+      { ...baseInput, fileMode: "snapshot", columnMapping: { itemNumberColumn: "Part Number", priceColumn: "Price" } },
+      1
+    );
+
+    expect(result.unchangedCount).toBe(1);
+    expect(result.changedCount).toBe(0);
+    expect(result.removedCount).toBe(0);
+    expect(result.addedCount).toBe(0);
+  });
+});

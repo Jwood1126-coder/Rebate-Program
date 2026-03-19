@@ -10,6 +10,11 @@
  * Follows reconciliation resolution patterns where they genuinely fit.
  * Key difference: contract updates produce supersessions (changed prices)
  * and new records (added items), not claim validations.
+ *
+ * Supersession chain: each "changed" diff supersedes the matched record,
+ * creating a linear chain A → B → C over repeated updates. If the target
+ * record was already superseded (e.g., by a concurrent reconciliation commit),
+ * the commit rejects that diff rather than breaking the chain.
  */
 
 import { prisma } from "@/lib/db/client";
@@ -458,6 +463,15 @@ async function commitChangedDiff(
   const oldRecord = await tx.rebateRecord.findUnique({ where: { id: diff.matchedRecordId } });
   if (!oldRecord) {
     throw new Error(`Matched record #${diff.matchedRecordId} not found`);
+  }
+
+  // Guard: if this record was already superseded (e.g., by a concurrent update or
+  // reconciliation commit), reject rather than breaking the supersession chain.
+  if (oldRecord.supersededById !== null) {
+    throw new Error(
+      `Record #${diff.matchedRecordId} was already superseded. ` +
+      `The contract may have been updated since this run was staged. Please create a new update run.`
+    );
   }
 
   // End-date the old record (day before effective date)

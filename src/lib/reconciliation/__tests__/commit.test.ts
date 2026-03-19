@@ -40,6 +40,17 @@ const { mockPrisma } = vi.hoisted(() => {
       reconciliationIssue: {
         findMany: vi.fn(),
       },
+      // Post-commit contract review helpers
+      claimBatch: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      claimRow: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      contract: {
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
       // $transaction calls the callback with the tx client
       $transaction: vi.fn(async (fn: (tx: typeof txMethods) => Promise<unknown>) => {
         return fn(txMethods);
@@ -118,6 +129,7 @@ function makeOldRecord(overrides: Record<string, unknown> = {}) {
     startDate: new Date('2026-01-01'),
     endDate: null,
     status: 'active',
+    supersededById: null,
     createdById: 1,
     updatedById: 1,
     ...overrides,
@@ -339,6 +351,25 @@ describe('commitRun', () => {
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/missing masterRecordId/);
     expect(result.failedIssueId).toBe(1);
+  });
+
+  it('CLM-001: fails cleanly when the validated record was superseded by a later contract update', async () => {
+    mockPrisma.reconciliationRun.findUnique.mockResolvedValue(makeRun());
+    mockPrisma.reconciliationIssue.findMany.mockResolvedValue([makeIssue()]);
+
+    const tx = mockPrisma._tx;
+    tx.rebateRecord.findUnique.mockResolvedValueOnce(
+      makeOldRecord({ supersededById: 99, status: 'superseded' }),
+    );
+
+    const result = await commitRun(1, 1);
+
+    expect(result.success).toBe(false);
+    expect(result.failedIssueId).toBe(1);
+    expect(result.error).toMatch(/already superseded/i);
+    expect(result.error).toMatch(/re-validate/i);
+    expect(tx.rebateRecord.create).not.toHaveBeenCalled();
+    expect(tx.rebateRecord.update).not.toHaveBeenCalled();
   });
 
   // --- CLM-003: Item not in contract ---
@@ -722,5 +753,23 @@ describe('commitRun', () => {
     // Second audit: UPDATE for superseded old record
     expect(auditCalls[1][0].data.action).toBe('UPDATE');
     expect(auditCalls[1][0].data.tableName).toBe('rebate_records');
+  });
+
+  // --- Supersession guard ---
+
+  it('rejects CLM-001 commit if target record was already superseded', async () => {
+    mockPrisma.reconciliationRun.findUnique.mockResolvedValue(makeRun());
+    mockPrisma.reconciliationIssue.findMany.mockResolvedValue([makeIssue()]);
+
+    const tx = mockPrisma._tx;
+    // Record was superseded by a contract update between validation and commit
+    tx.rebateRecord.findUnique.mockResolvedValue(makeOldRecord({
+      supersededById: 999,
+      status: 'superseded',
+    }));
+
+    const result = await commitRun(1, 1);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/already superseded/);
   });
 });

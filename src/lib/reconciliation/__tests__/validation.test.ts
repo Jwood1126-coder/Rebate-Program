@@ -605,6 +605,48 @@ describe('findEffectiveDateMatch', () => {
 // Tests — Effective-date matching in validateRun (integration)
 // ---------------------------------------------------------------------------
 describe('validateRun effective-date matching', () => {
+  it('loads only referenced contracts/items and keeps superseded history available for reconciliation', async () => {
+    mockPrisma.claimRow.findMany.mockResolvedValue([
+      makeClaimRow({
+        contractNumber: '100884',
+        itemNumber: '6801-12-12-NWO-FG',
+      }),
+    ]);
+
+    await validateRun(1);
+
+    expect(mockPrisma.contract.findMany).toHaveBeenCalledWith({
+      where: {
+        distributorId: 10,
+        contractNumber: { in: ['100884'] },
+      },
+      select: {
+        id: true,
+        contractNumber: true,
+        startDate: true,
+        endDate: true,
+        status: true,
+        rebatePlans: { select: { id: true, planCode: true } },
+      },
+    });
+
+    expect(mockPrisma.item.findMany).toHaveBeenCalledWith({
+      where: { itemNumber: { in: ['6801-12-12-NWO-FG'] } },
+      select: { id: true, itemNumber: true },
+    });
+
+    expect(mockPrisma.rebateRecord.findMany).toHaveBeenCalledWith({
+      where: {
+        rebatePlan: { contractId: { in: [1] } },
+        itemId: { in: [1] },
+        status: { notIn: ['draft', 'cancelled'] },
+      },
+      include: {
+        rebatePlan: { select: { contractId: true, planCode: true } },
+      },
+    });
+  });
+
   it('raises CLM-003 when record exists but does not cover transaction date', async () => {
     // Record ended in 2025, transaction in Feb 2026
     mockPrisma.rebateRecord.findMany.mockResolvedValue([
@@ -664,6 +706,51 @@ describe('validateRun effective-date matching', () => {
       expect.objectContaining({
         data: expect.objectContaining({ matchedRecordId: 20 }),
       })
+    );
+  });
+
+  it('matches a historical superseded record for an earlier transaction date', async () => {
+    mockPrisma.reconciliationRun.findUnique.mockResolvedValue(
+      makeRun({
+        claimPeriodStart: new Date('2026-01-01T00:00:00Z'),
+        claimPeriodEnd: new Date('2026-01-31T23:59:59Z'),
+      }),
+    );
+
+    mockPrisma.claimRow.findMany.mockResolvedValue([
+      makeClaimRow({
+        transactionDate: new Date('2026-01-15T00:00:00Z'),
+        deviatedPrice: new Decimal('2.50'),
+      }),
+    ]);
+
+    mockPrisma.rebateRecord.findMany.mockResolvedValue([
+      makeRebateRecord({
+        id: 10,
+        rebatePrice: new Decimal('2.50'),
+        startDate: new Date('2025-01-01'),
+        endDate: new Date('2026-01-31'),
+        status: 'superseded',
+      }),
+      makeRebateRecord({
+        id: 20,
+        rebatePrice: new Decimal('2.78'),
+        startDate: new Date('2026-02-01'),
+        endDate: null,
+        status: 'active',
+      }),
+    ]);
+
+    const result = await validateRun(1);
+
+    expect(result.matchedCount).toBe(1);
+    expect(result.issues.find(i => i.code === EXCEPTION_CODES.CLM_003)).toBeUndefined();
+    expect(result.issues.find(i => i.code === EXCEPTION_CODES.CLM_001)).toBeUndefined();
+
+    expect(mockPrisma.claimRow.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ matchedRecordId: 10 }),
+      }),
     );
   });
 

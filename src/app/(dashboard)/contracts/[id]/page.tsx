@@ -67,6 +67,79 @@ export default async function ContractDetailPage({
     statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;
   }
 
+  // Find last reconciliation run that touched this contract
+  const planIds = contract.rebatePlans.map((p) => p.id);
+  const recordIds = planIds.length > 0
+    ? await prisma.rebateRecord.findMany({
+        where: { rebatePlanId: { in: planIds } },
+        select: { id: true },
+      }).then((recs) => recs.map((r) => r.id))
+    : [];
+
+  let lastReconRun: { id: number; status: string; claimPeriodStart: Date; claimPeriodEnd: Date; completedAt: Date | null; startedAt: Date } | null = null;
+  if (recordIds.length > 0) {
+    // Find runs that had issues referencing this contract's records
+    lastReconRun = await prisma.reconciliationRun.findFirst({
+      where: {
+        status: "committed",
+        issues: {
+          some: {
+            OR: [
+              { masterRecordId: { in: recordIds } },
+              { committedRecordId: { in: recordIds } },
+            ],
+          },
+        },
+      },
+      orderBy: { completedAt: "desc" },
+      select: { id: true, status: true, claimPeriodStart: true, claimPeriodEnd: true, completedAt: true, startedAt: true },
+    });
+  }
+  // Also check by claim row contract number (covers runs where claims matched this contract)
+  if (!lastReconRun) {
+    const claimRow = await prisma.claimRow.findFirst({
+      where: {
+        contractNumber: contract.contractNumber,
+        batch: { distributorId: contract.distributorId },
+      },
+      orderBy: { id: "desc" },
+      select: { batch: { select: { id: true } } },
+    });
+    if (claimRow) {
+      lastReconRun = await prisma.reconciliationRun.findFirst({
+        where: {
+          claimBatchId: claimRow.batch.id,
+          status: "committed",
+        },
+        orderBy: { completedAt: "desc" },
+        select: { id: true, status: true, claimPeriodStart: true, claimPeriodEnd: true, completedAt: true, startedAt: true },
+      });
+    }
+  }
+
+  // Find last contract update run
+  const lastUpdateRun = await prisma.contractUpdateRun.findFirst({
+    where: { contractId, status: "committed" },
+    orderBy: { committedAt: "desc" },
+    select: { id: true, status: true, committedAt: true, fileName: true, changedCount: true, addedCount: true, removedCount: true },
+  });
+
+  const reconHistory = lastReconRun ? {
+    runId: lastReconRun.id,
+    status: lastReconRun.status,
+    claimPeriod: `${formatDate(lastReconRun.claimPeriodStart)} – ${formatDate(lastReconRun.claimPeriodEnd)}`,
+    completedAt: (lastReconRun.completedAt ?? lastReconRun.startedAt).toISOString(),
+  } : null;
+
+  const updateHistory = lastUpdateRun ? {
+    runId: lastUpdateRun.id,
+    committedAt: lastUpdateRun.committedAt?.toISOString() ?? null,
+    fileName: lastUpdateRun.fileName,
+    changedCount: lastUpdateRun.changedCount,
+    addedCount: lastUpdateRun.addedCount,
+    removedCount: lastUpdateRun.removedCount,
+  } : null;
+
   return (
     <ContractDetailClient
       contract={{
@@ -93,6 +166,8 @@ export default async function ContractDetailPage({
       plans={plans}
       totalRecords={allRecords.length}
       statusCounts={statusCounts}
+      lastReconciliation={reconHistory}
+      lastUpdate={updateHistory}
     />
   );
 }

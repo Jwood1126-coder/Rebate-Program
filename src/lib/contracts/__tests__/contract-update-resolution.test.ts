@@ -113,6 +113,7 @@ function resetAll() {
     startDate: new Date("2026-01-01"),
     endDate: new Date("2026-12-31"),
     status: "active",
+    supersededById: null,
   });
   mockPrisma._tx.rebateRecord.update.mockResolvedValue({});
   // Note: _tx.contractUpdateDiff.update is set as mockImplementation above
@@ -122,6 +123,22 @@ function resetAll() {
     async ({ data }: { data: Record<string, unknown> }) => ({ id: 50, ...data })
   );
   mockPrisma._tx.contract.update.mockResolvedValue({});
+}
+
+function mockRun(
+  status: string,
+  diffs: Array<Record<string, unknown>>,
+  overrides: Record<string, unknown> = {},
+) {
+  mockPrisma.contractUpdateRun.findUnique.mockResolvedValue({
+    id: 1,
+    status,
+    contractId: 1,
+    effectiveDate: new Date("2026-03-15"),
+    diffs,
+    contract: { id: 1, contractType: "fixed_term" },
+    ...overrides,
+  });
 }
 
 beforeEach(resetAll);
@@ -658,5 +675,35 @@ describe("commitContractUpdate", () => {
       })
     );
   });
-});
 
+  it("rejects commit if a changed diff's target record was already superseded", async () => {
+    mockRun("review", [{
+      id: 1,
+      diffType: DIFF_TYPES.CHANGED,
+      resolution: "apply",
+      resolutionData: null,
+      matchedRecordId: 100,
+      rebatePlanId: 10,
+      itemId: 1,
+      itemNumber: "PART-1",
+      newPrice: { toString: () => "6.0000" },
+      oldPrice: { toString: () => "5.0000" },
+    }]);
+
+    // The old record was superseded by a concurrent contract update
+    mockPrisma._tx.rebateRecord.findUnique.mockResolvedValue({
+      id: 100,
+      rebatePlanId: 10,
+      itemId: 1,
+      rebatePrice: { toString: () => "5.0000" },
+      startDate: new Date("2026-01-01"),
+      endDate: new Date("2026-12-31"),
+      status: "superseded",
+      supersededById: 999,
+    });
+
+    const result = await commitContractUpdate(1, 1);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/already superseded/);
+  });
+});

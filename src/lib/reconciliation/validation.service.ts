@@ -13,6 +13,7 @@
 
 import { prisma } from '@/lib/db/client';
 import { EXCEPTION_CODES, RUN_STATUSES, PRICE_MATCH_TOLERANCE } from './types';
+import { RECORD_STATUSES } from '@/lib/constants/statuses';
 import type { Prisma } from '@prisma/client';
 
 export interface ValidationResult {
@@ -74,7 +75,7 @@ export async function validateRun(runId: number): Promise<ValidationResult> {
   });
 
   // Pre-fetch reference data for this distributor to avoid N+1 queries
-  const refData = await loadReferenceData(run.distributorId);
+  const refData = await loadReferenceData(run.distributorId, claimRows);
 
   const allIssues: IssueSummary[] = [];
   let matchedCount = 0;
@@ -566,10 +567,31 @@ async function crossReferencePosData(
   return issues;
 }
 
-async function loadReferenceData(distributorId: number): Promise<ReferenceData> {
-  // Load all contracts for this distributor, including their plans
+async function loadReferenceData(
+  distributorId: number,
+  claimRows: { contractNumber: string | null; itemNumber: string | null }[],
+): Promise<ReferenceData> {
+  const contractNumbers = [...new Set(
+    claimRows
+      .map(row => row.contractNumber?.trim())
+      .filter((value): value is string => Boolean(value))
+  )];
+
+  const itemNumbers = [...new Set(
+    claimRows
+      .map(row => row.itemNumber?.trim())
+      .filter((value): value is string => Boolean(value))
+  )];
+
+  // Load only the contracts referenced in this run. This keeps repeated
+  // validation runs fast even when a distributor has a large contract catalog.
   const contracts = await prisma.contract.findMany({
-    where: { distributorId },
+    where: {
+      distributorId,
+      ...(contractNumbers.length > 0
+        ? { contractNumber: { in: contractNumbers } }
+        : {}),
+    },
     select: {
       id: true,
       contractNumber: true,
@@ -597,25 +619,33 @@ async function loadReferenceData(distributorId: number): Promise<ReferenceData> 
     });
   }
 
-  // Load all items
-  const items = await prisma.item.findMany({
-    select: { id: true, itemNumber: true },
-  });
+  // Load only the items referenced in this run for the same reason.
+  const items = itemNumbers.length === 0
+    ? []
+    : await prisma.item.findMany({
+        where: { itemNumber: { in: itemNumbers } },
+        select: { id: true, itemNumber: true },
+      });
   const itemsByNumber = new Map(
     items.map(i => [i.itemNumber, i])
   );
 
-  // Load all non-superseded, non-cancelled rebate records for this distributor's contracts
   const contractIds = contracts.map(c => c.id);
-  const records = await prisma.rebateRecord.findMany({
-    where: {
-      rebatePlan: { contractId: { in: contractIds } },
-      status: { notIn: ['cancelled', 'superseded'] },
-    },
-    include: {
-      rebatePlan: { select: { contractId: true, planCode: true } },
-    },
-  });
+  const itemIds = items.map(i => i.id);
+  const records = contractIds.length === 0 || itemIds.length === 0
+    ? []
+    : await prisma.rebateRecord.findMany({
+        where: {
+          rebatePlan: { contractId: { in: contractIds } },
+          itemId: { in: itemIds },
+          // Reconciliation must include historical superseded versions so old
+          // claim periods still match after repeated contract updates.
+          status: { notIn: [RECORD_STATUSES.DRAFT, RECORD_STATUSES.CANCELLED] },
+        },
+        include: {
+          rebatePlan: { select: { contractId: true, planCode: true } },
+        },
+      });
 
   // Build lookup: contractId|itemId -> array of records
   const recordsByContractItem = new Map<string, ReferenceRecord[]>();
@@ -635,6 +665,10 @@ async function loadReferenceData(distributorId: number): Promise<ReferenceData> 
     } else {
       recordsByContractItem.set(key, [refRec]);
     }
+  }
+
+  for (const bucket of recordsByContractItem.values()) {
+    bucket.sort((a, b) => b.startDate.getTime() - a.startDate.getTime());
   }
 
   return { contractsByNumber, itemsByNumber, recordsByContractItem };

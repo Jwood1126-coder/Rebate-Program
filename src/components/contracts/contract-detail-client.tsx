@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 interface ContractData {
@@ -40,11 +41,29 @@ interface PlanData {
   records: RecordRow[];
 }
 
+interface ReconHistory {
+  runId: number;
+  status: string;
+  claimPeriod: string;
+  completedAt: string;
+}
+
+interface UpdateHistory {
+  runId: number;
+  committedAt: string | null;
+  fileName: string;
+  changedCount: number;
+  addedCount: number;
+  removedCount: number;
+}
+
 interface Props {
   contract: ContractData;
   plans: PlanData[];
   totalRecords: number;
   statusCounts: Record<string, number>;
+  lastReconciliation: ReconHistory | null;
+  lastUpdate: UpdateHistory | null;
 }
 
 const statusColors: Record<string, string> = {
@@ -77,7 +96,8 @@ const contractTypeBadgeColors: Record<string, string> = {
   evergreen: "bg-teal-100 text-teal-700",
 };
 
-export function ContractDetailClient({ contract, plans, totalRecords, statusCounts }: Props) {
+export function ContractDetailClient({ contract, plans, totalRecords, statusCounts, lastReconciliation, lastUpdate }: Props) {
+  const router = useRouter();
   const [reviewLoading, setReviewLoading] = useState(false);
   const [lastReviewed, setLastReviewed] = useState(contract.lastReviewedAt);
   const [reviewError, setReviewError] = useState<string | null>(null);
@@ -172,6 +192,17 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
             >
               View all records →
             </Link>
+            <button
+              onClick={async () => {
+                if (!confirm(`Delete contract ${contract.contractNumber} and all its records? This cannot be undone.`)) return;
+                const res = await fetch(`/api/contracts/${contract.id}`, { method: "DELETE" });
+                if (res.ok) router.push("/contracts");
+                else alert("Failed to delete contract");
+              }}
+              className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-500 transition-colors hover:bg-red-50"
+            >
+              Delete
+            </button>
           </div>
         </div>
 
@@ -292,6 +323,70 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
               {new Date(contract.updatedAt).toLocaleDateString()}
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* Reconciliation & Update status bar */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* Reconciliation status */}
+        <div className={`rounded-lg border px-4 py-3 ${lastReconciliation ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className={`h-2.5 w-2.5 rounded-full ${lastReconciliation ? "bg-emerald-500" : "bg-amber-500"}`} />
+              <span className="text-xs font-semibold text-gray-700">Reconciliation</span>
+            </div>
+            {lastReconciliation ? (
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">Reconciled</span>
+            ) : (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">Not Reconciled</span>
+            )}
+          </div>
+          {lastReconciliation ? (
+            <div className="mt-1.5 flex items-center justify-between">
+              <p className="text-xs text-gray-600">
+                Last reconciled <span className="font-medium">{lastReconciliation.claimPeriod}</span>
+                {" "}on {new Date(lastReconciliation.completedAt).toLocaleDateString()}
+              </p>
+              <Link href="/reconciliation" className="text-xs font-medium text-emerald-700 hover:underline">
+                View →
+              </Link>
+            </div>
+          ) : (
+            <div className="mt-1.5 flex items-center justify-between">
+              <p className="text-xs text-amber-700">No claims have been reconciled against this contract yet.</p>
+              <Link
+                href="/reconciliation"
+                className="rounded-md bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700 transition-colors"
+              >
+                Reconcile
+              </Link>
+            </div>
+          )}
+        </div>
+
+        {/* Last update status */}
+        <div className={`rounded-lg border px-4 py-3 ${lastUpdate ? "border-blue-200 bg-blue-50" : "border-gray-200 bg-gray-50"}`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className={`h-2.5 w-2.5 rounded-full ${lastUpdate ? "bg-blue-500" : "bg-gray-400"}`} />
+              <span className="text-xs font-semibold text-gray-700">Contract Updates</span>
+            </div>
+            {lastUpdate ? (
+              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                {lastUpdate.changedCount + lastUpdate.addedCount + lastUpdate.removedCount} changes
+              </span>
+            ) : (
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500">Original</span>
+            )}
+          </div>
+          {lastUpdate ? (
+            <p className="mt-1.5 text-xs text-gray-600">
+              Last updated {lastUpdate.committedAt ? new Date(lastUpdate.committedAt).toLocaleDateString() : "—"}
+              {" "}— {lastUpdate.changedCount} price change{lastUpdate.changedCount !== 1 ? "s" : ""}, {lastUpdate.addedCount} added, {lastUpdate.removedCount} removed
+            </p>
+          ) : (
+            <p className="mt-1.5 text-xs text-gray-500">No updates have been applied to this contract.</p>
+          )}
         </div>
       </div>
 

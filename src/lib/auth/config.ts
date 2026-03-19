@@ -27,6 +27,17 @@ export const authConfig: NextAuthConfig = {
 
         if (!valid) return null;
 
+        // Log login event
+        try {
+          await prisma.loginEvent.create({
+            data: {
+              userId: user.id,
+              username: user.username,
+              action: "login",
+            },
+          });
+        } catch { /* don't block login if logging fails */ }
+
         return {
           id: String(user.id),
           name: user.displayName,

@@ -12,10 +12,21 @@ import type {
 // Props
 // ---------------------------------------------------------------------------
 
+export interface MatchedRow {
+  id: number;
+  rowNumber: number;
+  itemNumber: string | null;
+  contractNumber: string | null;
+  deviatedPrice: string | null;
+  quantity: string | null;
+  transactionDate: string | null;
+}
+
 export interface ReviewPanelProps {
   runId: number;
   run: ReconciliationRunSummary | null;
   issues: DbIssue[];
+  matchedRows?: MatchedRow[];
   progress: RunProgress | null;
   loading: boolean;
   expandedIssueId: number | null;
@@ -43,6 +54,7 @@ export function ReviewPanel({
   runId,
   run,
   issues,
+  matchedRows = [],
   progress,
   loading,
   expandedIssueId,
@@ -307,6 +319,11 @@ export function ReviewPanel({
               <div className="text-center py-6">
                 <p className="text-sm text-gray-500">No exceptions for this run.</p>
               </div>
+            )}
+
+            {/* Matched rows — clean claim lines that verified OK */}
+            {matchedRows.length > 0 && (
+              <MatchedRowsSection rows={matchedRows} />
             )}
           </>
         )}
@@ -688,6 +705,70 @@ function ResolutionBadge({ resolution }: { resolution: string }) {
 // ---------------------------------------------------------------------------
 // Formatting helpers
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Matched Rows Section — clean claim lines that verified OK
+// ---------------------------------------------------------------------------
+
+function MatchedRowsSection({ rows }: { rows: MatchedRow[] }) {
+  const [expanded, setExpanded] = React.useState(false);
+
+  return (
+    <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/50 overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-emerald-50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <svg className="h-4 w-4 text-emerald-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+          <span className="text-sm font-semibold text-emerald-800">
+            Verified — {rows.length} claim line{rows.length !== 1 ? "s" : ""} matched
+          </span>
+        </div>
+        <svg className={`h-4 w-4 text-emerald-400 transition-transform ${expanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+        </svg>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-emerald-200">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-emerald-50 text-left text-emerald-700 uppercase tracking-wider">
+                <th className="px-4 py-2">Row</th>
+                <th className="px-3 py-2">Item</th>
+                <th className="px-3 py-2">Contract</th>
+                <th className="px-3 py-2 text-right">Price</th>
+                <th className="px-3 py-2 text-right">Qty</th>
+                <th className="px-3 py-2">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-emerald-100">
+              {rows.map((row) => (
+                <tr key={row.id} className="bg-white">
+                  <td className="px-4 py-1.5 text-gray-400">#{row.rowNumber}</td>
+                  <td className="px-3 py-1.5 font-mono font-medium text-gray-700">{row.itemNumber ?? "—"}</td>
+                  <td className="px-3 py-1.5 text-gray-600">{row.contractNumber ?? "—"}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-gray-600">
+                    {row.deviatedPrice ? `$${Number(row.deviatedPrice).toFixed(4)}` : "—"}
+                  </td>
+                  <td className="px-3 py-1.5 text-right text-gray-600">
+                    {row.quantity ? Number(row.quantity).toLocaleString() : "—"}
+                  </td>
+                  <td className="px-3 py-1.5">
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">OK</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function formatPeriod(dateStr: string): string {
   const d = new Date(dateStr + (dateStr.includes("T") ? "" : "T00:00:00Z"));

@@ -101,6 +101,7 @@ export default function RunWorkflowClient({ run: initialRun, currentStep: initia
 
   // Review state
   const [reviewIssues, setReviewIssues] = useState<DbIssue[]>([]);
+  const [matchedRows, setMatchedRows] = useState<{ id: number; rowNumber: number; itemNumber: string | null; contractNumber: string | null; deviatedPrice: string | null; quantity: string | null; transactionDate: string | null }[]>([]);
   const [reviewProgress, setReviewProgress] = useState<RunProgress | null>(null);
   const [loadingReview, setLoadingReview] = useState(false);
   const [resolvingIssue, setResolvingIssue] = useState<number | null>(null);
@@ -114,6 +115,7 @@ export default function RunWorkflowClient({ run: initialRun, currentStep: initia
     summary?: CommitSummaryData;
     error?: string;
     failedIssueId?: number;
+    affectedContracts?: { id: number; contractNumber: string; distributorName: string }[];
   } | null>(null);
 
   // POS upload state
@@ -172,6 +174,7 @@ export default function RunWorkflowClient({ run: initialRun, currentStep: initia
         const data = await res.json();
         setReviewIssues(data.issues);
         setReviewProgress(data.progress);
+        if (data.matchedRows) setMatchedRows(data.matchedRows);
       }
     } finally {
       setLoadingReview(false);
@@ -478,6 +481,7 @@ export default function RunWorkflowClient({ run: initialRun, currentStep: initia
                 distributor: run.distributor,
               }}
               issues={reviewIssues}
+              matchedRows={matchedRows}
               progress={reviewProgress}
               loading={loadingReview}
               expandedIssueId={expandedIssueId}
@@ -530,48 +534,148 @@ export default function RunWorkflowClient({ run: initialRun, currentStep: initia
         )}
 
         {/* ---- DONE ---- */}
-        {activeStep === "done" && (
-          <div className="p-5 space-y-4">
-            <div className="flex items-center gap-3">
-              <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-              </svg>
-              <h2 className="text-base font-semibold text-green-800">Run Committed Successfully</h2>
-            </div>
+        {activeStep === "done" && (() => {
+          const cs = run.commitSummary;
+          const claimLines = run.totalClaimLines;
+          const matched = run.validatedCount;
+          const exceptions = run.exceptionCount;
+          const period = (() => {
+            try {
+              const s = new Date(run.claimPeriodStart);
+              const e = new Date(run.claimPeriodEnd);
+              return `${s.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${e.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+            } catch { return ""; }
+          })();
 
-            {run.commitSummary && (
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <SummaryCard label="Approved" value={run.commitSummary.totalApproved} color="green" />
-                <SummaryCard label="Records Created" value={run.commitSummary.recordsCreated} color="green" />
-                <SummaryCard label="Superseded" value={run.commitSummary.recordsSuperseded} color="amber" />
-                <SummaryCard label="Rejected" value={run.commitSummary.rejected} />
+          return (
+            <div className="p-5 space-y-5">
+              {/* Big success banner */}
+              <div className="rounded-xl border border-green-200 bg-green-50 p-5">
+                <div className="flex items-start gap-3">
+                  <svg className="h-8 w-8 text-green-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                  </svg>
+                  <div>
+                    <h2 className="text-lg font-bold text-green-800">Reconciliation Complete</h2>
+                    <p className="text-sm text-green-700 mt-1">
+                      {run.distributor.name} claim for <span className="font-medium">{period}</span> has been fully reconciled.
+                      {run.completedAt && (
+                        <> Completed {new Date(run.completedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}.</>
+                      )}
+                    </p>
+                  </div>
+                </div>
               </div>
-            )}
 
-            <div className="flex items-center gap-3">
-              <a
-                href={`/api/export/claim-response/${run.id}`}
-                download
-                className="rounded-lg bg-brennan-blue px-4 py-2 text-sm font-medium text-white hover:bg-brennan-dark"
-              >
-                Export Claim Response
-              </a>
-              <a
-                href={`/api/export/reconciliation-run/${run.id}`}
-                download
-                className="rounded-lg border border-brennan-border px-4 py-2 text-sm font-medium text-brennan-blue hover:bg-brennan-light"
-              >
-                Export CSV
-              </a>
-              <Link
-                href="/reconciliation"
-                className="rounded-lg border border-brennan-border px-4 py-2 text-sm font-medium text-brennan-text hover:bg-brennan-light"
-              >
-                Back to Checklist
-              </Link>
+              {/* Claim overview */}
+              <div className="rounded-xl border border-brennan-border bg-white p-5 space-y-4">
+                <h3 className="text-sm font-semibold text-brennan-text uppercase tracking-wide">Claim Summary</h3>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
+                  <div className="flex justify-between py-1 border-b border-gray-100">
+                    <span className="text-gray-500">Distributor</span>
+                    <span className="font-medium">{run.distributor.name} ({run.distributor.code})</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-gray-100">
+                    <span className="text-gray-500">Claim Period</span>
+                    <span className="font-medium">{period}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-gray-100">
+                    <span className="text-gray-500">Claim File</span>
+                    <span className="font-medium">{run.claimBatch?.fileName ?? "—"}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-gray-100">
+                    <span className="text-gray-500">Total Claim Lines</span>
+                    <span className="font-medium">{claimLines}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-gray-100">
+                    <span className="text-gray-500">Clean Matches</span>
+                    <span className="font-medium text-green-700">{matched}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-gray-100">
+                    <span className="text-gray-500">Exceptions Found</span>
+                    <span className="font-medium text-amber-700">{exceptions}</span>
+                  </div>
+                  {run.posBatch && (
+                    <div className="flex justify-between py-1 border-b border-gray-100">
+                      <span className="text-gray-500">POS File</span>
+                      <span className="font-medium">{run.posBatch.fileName} ({run.posBatch.totalRows} rows)</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between py-1 border-b border-gray-100">
+                    <span className="text-gray-500">Reviewed By</span>
+                    <span className="font-medium">{run.runBy.displayName}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Resolution outcomes */}
+              {cs && (
+                <div className="rounded-xl border border-brennan-border bg-white p-5 space-y-4">
+                  <h3 className="text-sm font-semibold text-brennan-text uppercase tracking-wide">Resolution Outcomes</h3>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <SummaryCard label="Approved" value={cs.totalApproved} color="green" />
+                    <SummaryCard label="Rejected" value={cs.rejected} color={cs.rejected > 0 ? "red" : undefined} />
+                    <SummaryCard label="Dismissed" value={cs.dismissed} />
+                    {cs.deferred > 0 && <SummaryCard label="Deferred" value={cs.deferred} color="amber" />}
+                  </div>
+                  {(cs.recordsCreated > 0 || cs.recordsSuperseded > 0 || cs.itemsCreated > 0) && (
+                    <div className="text-sm text-gray-600 border-t border-gray-100 pt-3 space-y-1">
+                      <p className="font-medium text-brennan-text">Changes applied to master data:</p>
+                      {cs.recordsCreated > 0 && <p>{cs.recordsCreated} new record{cs.recordsCreated !== 1 ? "s" : ""} created</p>}
+                      {cs.recordsSuperseded > 0 && <p>{cs.recordsSuperseded} record{cs.recordsSuperseded !== 1 ? "s" : ""} updated (old price superseded)</p>}
+                      {cs.itemsCreated > 0 && <p>{cs.itemsCreated} new item{cs.itemsCreated !== 1 ? "s" : ""} added to the system</p>}
+                      {cs.confirmed > 0 && <p>{cs.confirmed} informational item{cs.confirmed !== 1 ? "s" : ""} confirmed (no changes needed)</p>}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Affected contracts */}
+              {commitResult?.affectedContracts && commitResult.affectedContracts.length > 0 && (
+                <div className="rounded-xl border border-green-200 bg-green-50 p-5">
+                  <h3 className="text-sm font-semibold text-green-800 mb-2">
+                    Contracts marked as reviewed
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {commitResult.affectedContracts.map((c) => (
+                      <Link
+                        key={c.id}
+                        href={`/contracts/${c.id}`}
+                        className="inline-flex items-center gap-1.5 rounded-md bg-white border border-green-300 px-3 py-1.5 text-sm font-medium text-brennan-blue hover:bg-green-100 transition-colors"
+                      >
+                        Contract {c.contractNumber} &rarr;
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Export + navigation */}
+              <div className="flex items-center gap-3 pt-2">
+                <a
+                  href={`/api/export/claim-response/${run.id}`}
+                  download
+                  className="rounded-lg bg-brennan-blue px-4 py-2 text-sm font-medium text-white hover:bg-brennan-dark"
+                >
+                  Export Full Report
+                </a>
+                <a
+                  href={`/api/export/reconciliation-run/${run.id}`}
+                  download
+                  className="rounded-lg border border-brennan-border px-4 py-2 text-sm font-medium text-brennan-blue hover:bg-brennan-light"
+                >
+                  Export Exceptions
+                </a>
+                <Link
+                  href="/reconciliation"
+                  className="rounded-lg border border-brennan-border px-4 py-2 text-sm font-medium text-brennan-text hover:bg-brennan-light"
+                >
+                  Back to Checklist
+                </Link>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ---- UPLOAD (fallback for runs that somehow need files) ---- */}
         {activeStep === "upload" && (
@@ -611,7 +715,7 @@ export default function RunWorkflowClient({ run: initialRun, currentStep: initia
 // ---------------------------------------------------------------------------
 
 function SummaryCard({ label, value, color }: { label: string; value: string | number; color?: string }) {
-  const colorClass = color === "green" ? "text-green-700" : color === "amber" ? "text-amber-700" : "text-gray-900";
+  const colorClass = color === "green" ? "text-green-700" : color === "amber" ? "text-amber-700" : color === "red" ? "text-red-700" : "text-gray-900";
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50/50 px-4 py-3 text-center">
       <p className="text-xs text-gray-500">{label}</p>

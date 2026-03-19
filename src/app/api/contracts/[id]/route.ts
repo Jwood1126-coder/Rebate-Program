@@ -123,3 +123,90 @@ export async function PUT(
 
   return NextResponse.json(updated);
 }
+
+/**
+ * DELETE /api/contracts/:id — Delete a contract and all child data.
+ * Cascades through plans, records, update runs, diffs, and audit entries.
+ * This is a hard delete for testing/cleanup. In production, prefer cancellation.
+ */
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const sessionResult = await getSessionUser();
+  if ("error" in sessionResult) return sessionResult.error;
+  if (!canEdit(sessionResult.user.role)) {
+    return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+  }
+
+  const { id } = await params;
+  const contractId = Number(id);
+  if (isNaN(contractId)) {
+    return NextResponse.json({ error: "Invalid contract ID" }, { status: 400 });
+  }
+
+  const contract = await prisma.contract.findUnique({
+    where: { id: contractId },
+    select: { id: true, contractNumber: true },
+  });
+  if (!contract) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Cascade delete inside a transaction
+  await prisma.$transaction(async (tx) => {
+    // Get plan IDs and record IDs for this contract
+    const plans = await tx.rebatePlan.findMany({
+      where: { contractId },
+      select: { id: true },
+    });
+    const planIds = plans.map((p) => p.id);
+
+    const records = await tx.rebateRecord.findMany({
+      where: { rebatePlanId: { in: planIds } },
+      select: { id: true },
+    });
+    const recordIds = records.map((r) => r.id);
+
+    // Delete contract update diffs and runs
+    const updateRuns = await tx.contractUpdateRun.findMany({
+      where: { contractId },
+      select: { id: true },
+    });
+    const updateRunIds = updateRuns.map((r) => r.id);
+    if (updateRunIds.length > 0) {
+      await tx.contractUpdateDiff.deleteMany({ where: { runId: { in: updateRunIds } } });
+      await tx.contractUpdateRun.deleteMany({ where: { contractId } });
+    }
+
+    // Delete record notes
+    if (recordIds.length > 0) {
+      await tx.recordNote.deleteMany({ where: { rebateRecordId: { in: recordIds } } });
+    }
+
+    // Clear supersession references before deleting records
+    if (recordIds.length > 0) {
+      await tx.rebateRecord.updateMany({
+        where: { supersededById: { in: recordIds } },
+        data: { supersededById: null },
+      });
+    }
+
+    // Delete records, then plans
+    if (planIds.length > 0) {
+      await tx.rebateRecord.deleteMany({ where: { rebatePlanId: { in: planIds } } });
+      await tx.rebatePlan.deleteMany({ where: { contractId } });
+    }
+
+    // Delete audit entries referencing this contract
+    await tx.auditLog.deleteMany({ where: { tableName: "contracts", recordId: contractId } });
+    if (recordIds.length > 0) {
+      await tx.auditLog.deleteMany({ where: { tableName: "rebate_records", recordId: { in: recordIds } } });
+    }
+
+    // Delete the contract itself
+    await tx.contract.delete({ where: { id: contractId } });
+  });
+
+  return NextResponse.json({ success: true, contractNumber: contract.contractNumber });
+}

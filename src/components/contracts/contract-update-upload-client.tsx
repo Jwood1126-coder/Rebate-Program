@@ -137,30 +137,28 @@ export function ContractUpdateUploadClient({ contract }: { contract: ContractInf
       <div>
         <h1 className="text-xl font-bold text-brennan-text">Update Contract — {contract.contractNumber}</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Upload an item/price list to compare against current contract records.
+          Upload a new parts/pricing file and the system will show you what changed.
           {" "}{contract.distributor.code} — {contract.endUser.name}
         </p>
       </div>
 
       {/* Settings */}
       <div className="rounded-xl border border-brennan-border bg-white shadow-sm p-5 space-y-4">
-        <h2 className="text-base font-semibold text-brennan-text">Update Settings</h2>
-
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">File Mode <span className="text-red-500">*</span></label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">What does this file contain? <span className="text-red-500">*</span></label>
             <select
               value={fileMode}
               onChange={(e) => setFileMode(e.target.value as "snapshot" | "delta")}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue"
             >
-              <option value="delta">Delta — only rows in file are evaluated</option>
-              <option value="snapshot">Snapshot — full contract state; missing rows may be removed</option>
+              <option value="delta">Only changes — items not in this file stay as-is</option>
+              <option value="snapshot">Complete list — items missing from this file may be removed</option>
             </select>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Effective Date</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Apply changes as of</label>
             <input
               type="date"
               value={effectiveDate}
@@ -168,27 +166,26 @@ export function ContractUpdateUploadClient({ contract }: { contract: ContractInf
               onChange={(e) => setEffectiveDate(e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue"
             />
-            <p className="mt-1 text-xs text-gray-400">When changes take effect. Must be today or earlier. Defaults to today if blank.</p>
+            <p className="mt-1 text-xs text-gray-400">Leave blank for today.</p>
           </div>
         </div>
 
         {/* Plan selector — only shown for multi-plan contracts */}
         {contract.plans.length > 1 && (
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Target Plan</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Which plan does this file apply to?</label>
             <select
               value={planCode}
               onChange={(e) => setPlanCode(e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue"
             >
-              <option value="">All plans (items matched by plan membership)</option>
+              <option value="">Auto-detect (match by item)</option>
               {contract.plans.map((p) => (
                 <option key={p.id} value={p.planCode}>
                   {p.planCode}{p.planName ? ` — ${p.planName}` : ""}
                 </option>
               ))}
             </select>
-            <p className="mt-1 text-xs text-gray-400">This contract has multiple plans. Selecting a plan scopes matching and avoids ambiguous diffs.</p>
           </div>
         )}
       </div>
@@ -216,10 +213,10 @@ export function ContractUpdateUploadClient({ contract }: { contract: ContractInf
         {/* Column mapping */}
         {fileHeaders && (
           <div className="space-y-3 border-t border-gray-100 pt-4">
-            <h3 className="text-sm font-medium text-gray-700">Confirm Column Mapping</h3>
+            <h3 className="text-sm font-medium text-gray-700">Which columns have the part number and price?</h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Item / Part Number Column <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Part Number <span className="text-red-500">*</span></label>
                 <select
                   value={itemNumberColumn}
                   onChange={(e) => setItemNumberColumn(e.target.value)}
@@ -232,7 +229,7 @@ export function ContractUpdateUploadClient({ contract }: { contract: ContractInf
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Price Column <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Price <span className="text-red-500">*</span></label>
                 <select
                   value={priceColumn}
                   onChange={(e) => setPriceColumn(e.target.value)}
@@ -291,7 +288,7 @@ export function ContractUpdateUploadClient({ contract }: { contract: ContractInf
           disabled={!canStage || staging}
           className="rounded-lg bg-brennan-blue px-6 py-2 text-sm font-medium text-white hover:bg-brennan-dark disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {staging ? "Analyzing..." : "Analyze & Review"}
+          {staging ? "Comparing..." : "Compare & Review"}
         </button>
       </div>
     </div>

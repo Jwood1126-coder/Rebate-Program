@@ -91,16 +91,27 @@ interface PlanOption {
   planName: string | null;
 }
 
+interface CurrentRecord {
+  id: number;
+  itemNumber: string;
+  rebatePrice: number;
+  startDate: string;
+  endDate: string | null;
+  status: string;
+}
+
 export function ContractUpdateReviewClient({
   run,
   contract,
   diffs: initialDiffs,
   plans,
+  currentRecords = [],
 }: {
   run: RunData;
   contract: ContractInfo;
   diffs: DiffRow[];
   plans: PlanOption[];
+  currentRecords?: CurrentRecord[];
 }) {
   const router = useRouter();
   const [diffs, setDiffs] = useState(initialDiffs);
@@ -367,22 +378,193 @@ export function ContractUpdateReviewClient({
         </div>
       )}
 
-      {/* Diff sections */}
-      {changedDiffs.length > 0 && (
-        <DiffSection title="Price Changes" diffs={changedDiffs} resolvingId={resolvingId} onResolve={handleResolve} onResolveWithPlan={handleResolveWithPlan} plans={plans} isLocked={isLocked} />
-      )}
-      {addedDiffs.length > 0 && (
-        <DiffSection title="New Items" diffs={addedDiffs} resolvingId={resolvingId} onResolve={handleResolve} onResolveWithPlan={handleResolveWithPlan} plans={plans} isLocked={isLocked} />
-      )}
-      {removedDiffs.length > 0 && (
-        <DiffSection title="Removed Items" diffs={removedDiffs} resolvingId={resolvingId} onResolve={handleResolve} onResolveWithPlan={handleResolveWithPlan} plans={plans} isLocked={isLocked} />
-      )}
+      {/* Unified contract view — every item in one table */}
+      {(() => {
+        // Build lookup: item number → diff
+        const diffByItem = new Map<string, DiffRow>();
+        for (const d of diffs) diffByItem.set(d.itemNumber, d);
 
-      {diffs.length === 0 && (
-        <div className="rounded-lg border border-brennan-border bg-white py-8 text-center text-sm text-gray-400">
-          No actionable differences found. All {run.unchangedCount} rows match.
-        </div>
-      )}
+        // Merge: existing records + new items (added diffs not in current records)
+        const existingItemNumbers = new Set(currentRecords.map((r) => r.itemNumber));
+
+        type UnifiedRow = {
+          key: string;
+          itemNumber: string;
+          currentPrice: number | null;
+          newPrice: number | null;
+          status: "no change" | "changed" | "added" | "removed";
+          diff: DiffRow | null;
+          dates: string;
+        };
+
+        const rows: UnifiedRow[] = [];
+
+        // Existing records
+        for (const rec of currentRecords) {
+          const diff = diffByItem.get(rec.itemNumber) ?? null;
+          const status = diff?.diffType === "changed" ? "changed" as const
+            : diff?.diffType === "removed" ? "removed" as const
+            : "no change" as const;
+          rows.push({
+            key: `rec-${rec.id}`,
+            itemNumber: rec.itemNumber,
+            currentPrice: rec.rebatePrice,
+            newPrice: diff?.newPrice ?? null,
+            status,
+            diff,
+            dates: `${rec.startDate}${rec.endDate ? ` – ${rec.endDate}` : " – open"}`,
+          });
+        }
+
+        // New items (added diffs not already in current records)
+        for (const d of addedDiffs) {
+          if (!existingItemNumbers.has(d.itemNumber)) {
+            rows.push({
+              key: `add-${d.id}`,
+              itemNumber: d.itemNumber,
+              currentPrice: null,
+              newPrice: d.newPrice,
+              status: "added",
+              diff: d,
+              dates: "",
+            });
+          }
+        }
+
+        const statusBg: Record<string, string> = {
+          changed: "bg-amber-50",
+          added: "bg-emerald-50",
+          removed: "bg-red-50",
+          "no change": "",
+        };
+
+        const statusBadge: Record<string, { bg: string; text: string; label: string }> = {
+          changed: { bg: "bg-amber-100", text: "text-amber-700", label: "price change" },
+          added: { bg: "bg-emerald-100", text: "text-emerald-700", label: "new item" },
+          removed: { bg: "bg-red-100", text: "text-red-700", label: "removed" },
+          "no change": { bg: "bg-gray-100", text: "text-gray-500", label: "no change" },
+        };
+
+        return (
+          <div className="rounded-lg border border-brennan-border bg-white shadow-sm overflow-hidden">
+            <div className="px-5 py-3 border-b border-brennan-border bg-gray-50 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-brennan-text">
+                  Contract {contract.contractNumber} — {rows.length} item{rows.length !== 1 ? "s" : ""}
+                </h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {run.unchangedCount} unchanged · {run.changedCount} price change{run.changedCount !== 1 ? "s" : ""} · {run.addedCount} new · {run.removedCount} removed
+                </p>
+              </div>
+              <div className="flex items-center gap-1 text-[10px] text-gray-400">
+                <span className="inline-block w-3 h-3 rounded bg-amber-100 border border-amber-200" /> price change
+                <span className="ml-2 inline-block w-3 h-3 rounded bg-emerald-100 border border-emerald-200" /> new
+                <span className="ml-2 inline-block w-3 h-3 rounded bg-red-100 border border-red-200" /> removed
+              </div>
+            </div>
+
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-gray-100 text-left text-gray-500 uppercase tracking-wider">
+                  <th className="px-5 py-2">Item</th>
+                  <th className="px-3 py-2 text-right">Current Price</th>
+                  <th className="px-3 py-2 text-right">New Price</th>
+                  <th className="px-3 py-2">Change</th>
+                  <th className="px-3 py-2">Resolution</th>
+                  {!isLocked && <th className="px-3 py-2 text-right">Actions</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {rows.map((row) => {
+                  const badge = statusBadge[row.status];
+                  const isResolved = !!row.diff?.resolution;
+
+                  return (
+                    <tr key={row.key} className={`${statusBg[row.status]} ${isResolved ? "opacity-60" : ""}`}>
+                      <td className="px-5 py-2 font-mono font-medium text-brennan-text">{row.itemNumber}</td>
+                      <td className={`px-3 py-2 text-right font-mono ${row.status === "changed" ? "line-through text-gray-400" : row.currentPrice != null ? "text-gray-600" : "text-gray-300"}`}>
+                        {row.currentPrice != null ? `$${row.currentPrice.toFixed(4)}` : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {row.newPrice != null ? (
+                          <span className={`font-medium ${row.status === "changed" ? "text-amber-700" : row.status === "added" ? "text-emerald-700" : "text-gray-700"}`}>
+                            ${row.newPrice.toFixed(4)}
+                          </span>
+                        ) : row.status === "removed" ? (
+                          <span className="text-red-400 italic">—</span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${badge.bg} ${badge.text}`}>
+                          {badge.label}
+                        </span>
+                        {row.diff?.ambiguityReason && (
+                          <p className="mt-0.5 text-[10px] text-amber-600 max-w-xs truncate" title={row.diff.ambiguityReason}>
+                            {row.diff.ambiguityReason}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        {row.diff ? (
+                          row.diff.resolution ? (
+                            <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${resolutionBadge[row.diff.resolution] || "bg-gray-100"}`}>
+                              {row.diff.resolution}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 italic">pending</span>
+                          )
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                      {!isLocked && (
+                        <td className="px-3 py-2 text-right">
+                          {row.diff && !row.diff.resolution && (
+                            row.diff.matchStatus === "ambiguous" && plans.length > 1 ? (
+                              <AmbiguousDiffActions
+                                diffId={row.diff.id}
+                                plans={plans}
+                                resolvingId={resolvingId}
+                                onResolveWithPlan={handleResolveWithPlan}
+                                onSkip={() => handleResolve(row.diff!.id, "skip")}
+                              />
+                            ) : (
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  onClick={() => handleResolve(row.diff!.id, "apply")}
+                                  disabled={resolvingId === row.diff!.id}
+                                  className="rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-40"
+                                >
+                                  Apply
+                                </button>
+                                <button
+                                  onClick={() => handleResolve(row.diff!.id, "skip")}
+                                  disabled={resolvingId === row.diff!.id}
+                                  className="rounded border border-gray-300 bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+                                >
+                                  Skip
+                                </button>
+                              </div>
+                            )
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {diffs.length === 0 && (
+              <div className="py-6 text-center text-sm text-gray-400">
+                No differences found. All {run.unchangedCount} items match.
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Commit bar */}
       {!isLocked && (
@@ -410,127 +592,6 @@ export function ContractUpdateReviewClient({
           ← Back to contract
         </Link>
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Diff Section
-// ---------------------------------------------------------------------------
-
-function DiffSection({
-  title,
-  diffs,
-  resolvingId,
-  onResolve,
-  onResolveWithPlan,
-  plans,
-  isLocked,
-}: {
-  title: string;
-  diffs: DiffRow[];
-  resolvingId: number | null;
-  onResolve: (id: number, resolution: "apply" | "skip" | "modify") => void;
-  onResolveWithPlan: (id: number, targetPlanId: number) => void;
-  plans: PlanOption[];
-  isLocked: boolean;
-}) {
-  return (
-    <div className="rounded-lg border border-brennan-border bg-white shadow-sm overflow-hidden">
-      <div className="px-4 py-2.5 bg-gray-50 border-b border-brennan-border">
-        <h3 className="text-sm font-semibold text-brennan-text">{title} ({diffs.length})</h3>
-      </div>
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="border-b border-gray-100 text-left text-gray-500 uppercase tracking-wider">
-            <th className="px-4 py-1.5">Item #</th>
-            {diffs[0]?.planCode && <th className="px-3 py-1.5">Plan</th>}
-            <th className="px-3 py-1.5">Type</th>
-            <th className="px-3 py-1.5 text-right">Old Price</th>
-            <th className="px-3 py-1.5 text-right">New Price</th>
-            <th className="px-3 py-1.5">Match</th>
-            <th className="px-3 py-1.5">Status</th>
-            {!isLocked && <th className="px-3 py-1.5 text-right">Actions</th>}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-50">
-          {diffs.map((diff) => (
-            <tr
-              key={diff.id}
-              className={diff.resolution ? "bg-gray-50/50 opacity-70" : "hover:bg-gray-50/50"}
-            >
-              <td className="px-4 py-2 font-mono font-medium text-brennan-text">
-                {diff.itemNumber}
-              </td>
-              {diff.planCode !== undefined && (
-                <td className="px-3 py-2 text-gray-600">{diff.planCode || "—"}</td>
-              )}
-              <td className="px-3 py-2">
-                <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${diffTypeBadge[diff.diffType] || "bg-gray-100"}`}>
-                  {diff.diffType}
-                </span>
-              </td>
-              <td className="px-3 py-2 text-right font-mono text-gray-600">
-                {diff.oldPrice != null ? `$${diff.oldPrice.toFixed(4)}` : "—"}
-              </td>
-              <td className="px-3 py-2 text-right font-mono text-gray-700 font-medium">
-                {diff.newPrice != null ? `$${diff.newPrice.toFixed(4)}` : "—"}
-              </td>
-              <td className="px-3 py-2">
-                <span className={`inline-block rounded-full px-2 py-0.5 text-xs ${matchStatusBadge[diff.matchStatus] || "bg-gray-100"}`}>
-                  {diff.matchStatus}
-                </span>
-                {diff.ambiguityReason && (
-                  <p className="mt-0.5 text-[10px] text-amber-600 max-w-xs truncate" title={diff.ambiguityReason}>
-                    {diff.ambiguityReason}
-                  </p>
-                )}
-              </td>
-              <td className="px-3 py-2">
-                {diff.resolution ? (
-                  <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${resolutionBadge[diff.resolution] || "bg-gray-100"}`}>
-                    {diff.resolution}
-                  </span>
-                ) : (
-                  <span className="text-gray-400 italic">pending</span>
-                )}
-              </td>
-              {!isLocked && (
-                <td className="px-3 py-2 text-right">
-                  {!diff.resolution && (
-                    diff.matchStatus === "ambiguous" && plans.length > 1 ? (
-                      <AmbiguousDiffActions
-                        diffId={diff.id}
-                        plans={plans}
-                        resolvingId={resolvingId}
-                        onResolveWithPlan={onResolveWithPlan}
-                        onSkip={() => onResolve(diff.id, "skip")}
-                      />
-                    ) : (
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => onResolve(diff.id, "apply")}
-                          disabled={resolvingId === diff.id}
-                          className="rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-40"
-                        >
-                          Apply
-                        </button>
-                        <button
-                          onClick={() => onResolve(diff.id, "skip")}
-                          disabled={resolvingId === diff.id}
-                          className="rounded border border-gray-300 bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40"
-                        >
-                          Skip
-                        </button>
-                      </div>
-                    )
-                  )}
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

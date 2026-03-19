@@ -267,8 +267,28 @@ model User {
   contractUpdateRuns    ContractUpdateRun[]    @relation("UpdateRunUploadedBy")
   committedUpdateRuns   ContractUpdateRun[]    @relation("UpdateRunCommittedBy")
   resolvedDiffs         ContractUpdateDiff[]  @relation("DiffResolvedBy")
+  loginEvents           LoginEvent[]
 
   @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// LOGIN EVENTS — tracks who logs in and when
+// ---------------------------------------------------------------------------
+model LoginEvent {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  username  String   @db.VarChar(100)
+  action    String   @db.VarChar(20) // "login" or "logout"
+  ipAddress String?  @map("ip_address") @db.VarChar(100)
+  userAgent String?  @map("user_agent") @db.VarChar(500)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("login_events")
 }
 
 // ---------------------------------------------------------------------------

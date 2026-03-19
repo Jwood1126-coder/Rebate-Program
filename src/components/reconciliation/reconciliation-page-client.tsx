@@ -1087,8 +1087,7 @@ export default function ReconciliationPageClient({
 
 function getDefaultPeriod(): string {
   const now = new Date();
-  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function formatPeriod(dateStr: string): string {
