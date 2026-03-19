@@ -4,6 +4,40 @@ All notable changes to this project are documented in this file, grouped by sess
 
 ---
 
+## 2026-03-19 — Contract File Storage, Fastenal Test Data, File Hardening
+
+### Contract File Storage (Schema Change)
+- New `contract_files` table: stores original uploaded documents as bytea blobs
+- Auto-archived on contract creation and contract update staging
+- Documents panel on contract detail page (collapsible, with download/delete/upload)
+- File types: `contract`, `update`, `spa`, `claim`, `document`
+
+### File Storage Guardrails
+- Shared `validateFileForStorage()` in `src/lib/constants/file-limits.ts`
+- 10MB max file size, allowed extensions: xlsx, xls, csv, pdf, doc, docx
+- Guardrails applied consistently: manual uploads, import archival, update archival
+- `fileStorageWarning` returned to client when archival fails (not silent)
+- Warning surfaced in contract wizard success screen and update upload flow
+- `fileType` validated against allowlist on manual upload
+- Numeric ID validation on file download/delete routes
+- File deletion audit-logged via `auditService.logDelete()`
+- Auto-stored files (contract/update) flagged in audit entries
+
+### Fastenal SPA Test Data
+- `CONTRACT (SPA) - Fastenal (Bayshore) 2026-03-19.xlsx` — 8 items in SPA format
+- `CLAIM - Fastenal (mixed contracts) Mar2026.xlsx` — 8 rows, 2 contracts, 3 expected exceptions
+- `UPDATE (SPA) - Fastenal (Bayshore) 2026-03-19.xlsx` — 2 price changes, 2 new, 2 removed
+
+### Test Coverage
+- 348 tests across 20 files (12 new file-limits tests)
+- Covers: size validation, type validation, boundary conditions, edge cases
+
+### Schema Note
+- This repo uses `prisma db push` for schema management (no migration files)
+- Railway `start.sh` runs `prisma db push` on each deploy
+
+---
+
 ## 2026-03-19 — Manual Add Items, Fastenal SPA Import/Export, Reconciliation UX, Export Improvements
 
 ### Manual Add Items on Contract Detail

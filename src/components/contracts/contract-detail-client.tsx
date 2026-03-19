@@ -777,11 +777,224 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
           </div>
         );
       })()}
+      {/* Documents panel */}
+      <DocumentsPanel contractId={contract.id} />
+
       {/* Activity & Dispute History panels */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ActivityPanel contractId={contract.id} />
         <DisputePanel contractId={contract.id} />
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Documents Panel (lazy-loaded)
+// ---------------------------------------------------------------------------
+
+interface ContractFileInfo {
+  id: number;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  mimeType: string;
+  description: string | null;
+  uploadedAt: string;
+  uploadedBy: { displayName: string };
+}
+
+const fileTypeLabels: Record<string, string> = {
+  spa: "SPA Form",
+  contract: "Contract Upload",
+  update: "Update Upload",
+  claim: "Claim File",
+  document: "Document",
+};
+
+const ALLOWED_FILE_EXTENSIONS = ["xlsx", "xls", "csv", "pdf", "doc", "docx"];
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+
+function DocumentsPanel({ contractId }: { contractId: number }) {
+  const [files, setFiles] = useState<ContractFileInfo[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function loadFiles() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/contracts/${contractId}/files`);
+      if (res.ok) {
+        setFiles(await res.json());
+      } else {
+        setError("Failed to load documents. Please try again.");
+      }
+    } catch {
+      setError("Failed to load documents. Please check your connection.");
+    }
+    setLoading(false);
+  }
+
+  function handleExpand() {
+    if (!expanded) {
+      loadFiles();
+    }
+    setExpanded(!expanded);
+  }
+
+  function validateFile(file: File): string | null {
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return `File too large (${(file.size / (1024 * 1024)).toFixed(1)}MB). Maximum allowed size is 10MB.`;
+    }
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    if (!ALLOWED_FILE_EXTENSIONS.includes(ext)) {
+      return `File type ".${ext}" is not allowed. Accepted types: ${ALLOWED_FILE_EXTENSIONS.join(", ")}.`;
+    }
+    return null;
+  }
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const validationError = validateFile(file);
+    if (validationError) {
+      setError(validationError);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    setUploading(true);
+    setError(null);
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("fileType", "document");
+    try {
+      const res = await fetch(`/api/contracts/${contractId}/files`, {
+        method: "POST",
+        body: fd,
+      });
+      if (res.ok) {
+        await loadFiles();
+      } else {
+        const body = await res.json().catch(() => null);
+        setError(body?.error || "Upload failed. Please try again.");
+      }
+    } catch {
+      setError("Upload failed. Please check your connection.");
+    }
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function handleDelete(fileId: number, fileName: string) {
+    if (!confirm(`Delete "${fileName}"?`)) return;
+    setError(null);
+    try {
+      const res = await fetch(`/api/contracts/${contractId}/files/${fileId}`, { method: "DELETE" });
+      if (res.ok) {
+        await loadFiles();
+      } else {
+        const body = await res.json().catch(() => null);
+        setError(body?.error || "Failed to delete file. Please try again.");
+      }
+    } catch {
+      setError("Failed to delete file. Please check your connection.");
+    }
+  }
+
+  function formatSize(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  return (
+    <div className="rounded-lg border border-brennan-border bg-white shadow-sm">
+      <button
+        onClick={handleExpand}
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+          </svg>
+          <span className="text-sm font-semibold text-brennan-text">Documents</span>
+          {files.length > 0 && (
+            <span className="text-xs text-gray-400">{files.length} file{files.length !== 1 ? "s" : ""}</span>
+          )}
+        </div>
+        <svg className={`h-4 w-4 text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+        </svg>
+      </button>
+      {expanded && (
+        <div className="border-t border-brennan-border px-4 py-3">
+          {error && (
+            <div className="mb-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+              {error}
+            </div>
+          )}
+          {loading ? (
+            <p className="text-xs text-gray-400">Loading...</p>
+          ) : files.length === 0 ? (
+            <p className="text-xs text-gray-400">No documents uploaded yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {files.map((f) => (
+                <div key={f.id} className="flex items-center justify-between rounded border border-gray-100 bg-gray-50 px-3 py-2">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <svg className="h-4 w-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                    </svg>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-gray-700 truncate">{f.fileName}</p>
+                      <p className="text-[10px] text-gray-400">
+                        {fileTypeLabels[f.fileType] || f.fileType} · {formatSize(f.fileSize)} · {f.uploadedBy.displayName} · {new Date(f.uploadedAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <a
+                      href={`/api/contracts/${contractId}/files/${f.id}`}
+                      download
+                      className="rounded border border-gray-200 px-2 py-0.5 text-[10px] font-medium text-brennan-blue hover:bg-brennan-light"
+                    >
+                      Download
+                    </a>
+                    <button
+                      onClick={() => handleDelete(f.id, f.fileName)}
+                      className="rounded border border-gray-200 px-2 py-0.5 text-[10px] text-red-500 hover:bg-red-50"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-3 flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv,.pdf,.doc,.docx"
+              onChange={handleUpload}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="rounded border border-brennan-border bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-brennan-light disabled:opacity-50"
+            >
+              {uploading ? "Uploading..." : "+ Upload Document"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth/session';
 import { canEdit } from '@/lib/auth/roles';
+import { prisma } from '@/lib/db/client';
 import { CONTRACT_TYPES } from '@/lib/constants/statuses';
 import {
   previewContractImport,
@@ -130,5 +131,36 @@ export async function POST(request: NextRequest) {
   }
 
   const result = await commitSimpleImport(fileBuffer, fileName, context, sessionResult.user.id, columnMapping);
+
+  // Store the original file on successful import (with shared guardrails)
+  if (result.success && result.contractId) {
+    let fileStorageWarning: string | undefined;
+    const { validateFileForStorage } = await import('@/lib/constants/file-limits');
+    const fileValidation = validateFileForStorage(fileName, fileBuffer.length);
+    if (fileValidation) {
+      fileStorageWarning = `Original file not archived: ${fileValidation}`;
+    } else try {
+      await prisma.contractFile.create({
+        data: {
+          contractId: result.contractId,
+          fileName: fileName,
+          fileType: 'contract',
+          fileSize: fileBuffer.length,
+          mimeType: file.type || 'application/octet-stream',
+          fileData: fileBuffer,
+          description: 'Original contract upload',
+          uploadedById: sessionResult.user.id,
+        },
+      });
+    } catch {
+      // File storage failure should not block contract creation, but warn the user
+      fileStorageWarning = 'Original file could not be saved for reference. The contract was created successfully, but the source file was not archived.';
+    }
+
+    if (fileStorageWarning) {
+      return NextResponse.json({ ...result, fileStorageWarning }, { status: 201 });
+    }
+  }
+
   return NextResponse.json(result, { status: result.success ? 201 : 400 });
 }

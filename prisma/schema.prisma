@@ -86,11 +86,34 @@ model Contract {
   endUser          EndUser      @relation(fields: [endUserId], references: [id])
   rebatePlans      RebatePlan[]
   updateRuns       ContractUpdateRun[]
+  files            ContractFile[]
 
   @@unique([distributorId, endUserId, contractNumber])
   @@index([distributorId])
   @@index([endUserId])
   @@map("contracts")
+}
+
+// ---------------------------------------------------------------------------
+// CONTRACT FILES — original uploaded documents stored for reference/audit
+// ---------------------------------------------------------------------------
+model ContractFile {
+  id           Int      @id @default(autoincrement())
+  contractId   Int      @map("contract_id")
+  fileName     String   @map("file_name") @db.VarChar(255)
+  fileType     String   @map("file_type") @db.VarChar(50) // spa, contract, update, claim
+  fileSize     Int      @map("file_size") // bytes
+  mimeType     String   @map("mime_type") @db.VarChar(100)
+  fileData     Bytes    @map("file_data") // original file blob
+  description  String?  @db.VarChar(500)
+  uploadedById Int      @map("uploaded_by_id")
+  uploadedAt   DateTime @default(now()) @map("uploaded_at")
+
+  contract     Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  uploadedBy   User     @relation("contractFileUploader", fields: [uploadedById], references: [id])
+
+  @@index([contractId])
+  @@map("contract_files")
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +291,7 @@ model User {
   committedUpdateRuns   ContractUpdateRun[]    @relation("UpdateRunCommittedBy")
   resolvedDiffs         ContractUpdateDiff[]  @relation("DiffResolvedBy")
   loginEvents           LoginEvent[]
+  contractFiles         ContractFile[]        @relation("contractFileUploader")
 
   @@map("users")
 }

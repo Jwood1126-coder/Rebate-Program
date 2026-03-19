@@ -25,6 +25,7 @@ type TxClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transa
 
 export interface ContractImportResult {
   success: boolean;
+  contractId?: number;
   contractsCreated: number;
   plansCreated: number;
   recordsCreated: number;
@@ -1001,11 +1002,12 @@ export async function commitSimpleImport(
       recordsCreated++;
     }
 
-    return { recordsCreated };
+    return { contractId: contract.id, recordsCreated };
   });
 
   return {
     success: true,
+    contractId: result.contractId,
     contractsCreated: 1,
     plansCreated: 1,
     recordsCreated: result.recordsCreated,

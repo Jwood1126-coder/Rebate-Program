@@ -119,7 +119,38 @@ export async function POST(
 
   const stageResult = await stageContractUpdate(fileBuffer, fileName, input, user.id);
 
-  return NextResponse.json(stageResult, {
+  // Store the original file on successful staging (with shared guardrails)
+  let fileStorageWarning: string | undefined;
+  if (stageResult.success) {
+    const { validateFileForStorage } = await import("@/lib/constants/file-limits");
+    const fileValidation = validateFileForStorage(fileName, fileBuffer.length);
+    if (fileValidation) {
+      fileStorageWarning = `Original file not archived: ${fileValidation}`;
+    } else try {
+      const { prisma: db } = await import("@/lib/db/client");
+      await db.contractFile.create({
+        data: {
+          contractId,
+          fileName,
+          fileType: "update",
+          fileSize: fileBuffer.length,
+          mimeType: file.type || "application/octet-stream",
+          fileData: fileBuffer,
+          description: `Contract update (${fileMode} mode)`,
+          uploadedById: user.id,
+        },
+      });
+    } catch {
+      // File storage failure should not block the update, but warn the user
+      fileStorageWarning = "Original file could not be saved for reference. The update was staged successfully, but the source file was not archived.";
+    }
+  }
+
+  const responseBody = fileStorageWarning
+    ? { ...stageResult, fileStorageWarning }
+    : stageResult;
+
+  return NextResponse.json(responseBody, {
     status: stageResult.success ? 201 : 400,
   });
 }

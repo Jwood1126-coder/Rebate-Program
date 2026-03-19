@@ -23,6 +23,7 @@ interface StageResult {
   removedCount: number;
   errors: string[];
   warnings: string[];
+  fileStorageWarning?: string;
 }
 
 interface HeadersResult {
@@ -111,7 +112,9 @@ export function ContractUpdateUploadClient({ contract }: { contract: ContractInf
       const data: StageResult = await res.json();
 
       if (data.success && data.runId) {
-        router.push(`/contracts/${contract.id}/update/${data.runId}`);
+        // Surface file storage warning via URL param if present
+        const warningParam = data.fileStorageWarning ? `&fileWarning=${encodeURIComponent(data.fileStorageWarning)}` : '';
+        router.push(`/contracts/${contract.id}/update/${data.runId}?staged=true${warningParam}`);
       } else {
         setError(data.errors?.join("; ") || "Failed to stage update");
       }

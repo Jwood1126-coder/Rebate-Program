@@ -63,6 +63,7 @@ interface ImportResult {
   errors: string[];
   warnings: string[];
   preview?: PreviewGroup[];
+  fileStorageWarning?: string;
 }
 
 type Mode = "upload" | "manual";
@@ -363,6 +364,11 @@ function UploadMode({
           <p><span className="font-medium">{commitResult.recordsCreated}</span> line item{commitResult.recordsCreated !== 1 ? "s" : ""} created</p>
           <p className="text-xs text-gray-400">Dates: {startDate} — {endDate || "Open"}{customerNumber ? ` · Customer #${customerNumber}` : ""}</p>
         </div>
+        {commitResult.fileStorageWarning && (
+          <div className="text-left max-w-md mx-auto rounded border border-amber-200 bg-amber-50 px-3 py-2">
+            <p className="text-xs text-amber-700">{commitResult.fileStorageWarning}</p>
+          </div>
+        )}
         {commitResult.warnings.length > 0 && (
           <div className="text-left max-w-md mx-auto">
             <p className="text-xs font-medium text-amber-600 mb-1">Notes:</p>
