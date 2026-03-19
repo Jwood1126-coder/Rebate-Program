@@ -73,7 +73,6 @@ export default async function DashboardPage() {
         <QuickAction href="/records" label="Browse Records" />
         <QuickAction href="/audit" label="Audit Log" />
         <QuickAction href="/data-quality" label="Data Quality" />
-        <QuickAction href="/test-data" label="Test Data" />
       </div>
     </div>
   );

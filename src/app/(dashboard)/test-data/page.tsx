@@ -1,10 +1,16 @@
 import { readdir } from 'fs/promises';
 import path from 'path';
 import Link from 'next/link';
+import { auth } from '@/lib/auth';
+import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
 export default async function TestDataPage() {
+  // Admin only — hide from sales testers
+  const session = await auth();
+  const role = (session?.user as unknown as { role?: string })?.role;
+  if (role !== 'admin') redirect('/');
   const testDataDir = path.join(process.cwd(), 'public', 'test-data');
 
   let allFiles: string[] = [];

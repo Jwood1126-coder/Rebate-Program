@@ -1,10 +1,9 @@
 #!/bin/sh
 
 echo "=== WAITING FOR DATABASE ==="
-# Retry prisma db push up to 10 times with 3 second delays
 ATTEMPT=0
 MAX_ATTEMPTS=10
-until npx prisma db push --skip-generate --accept-data-loss 2>&1; do
+until npx prisma db push --skip-generate 2>&1; do
   ATTEMPT=$((ATTEMPT + 1))
   if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
     echo "ERROR: Could not connect to database after $MAX_ATTEMPTS attempts"
@@ -15,16 +14,18 @@ until npx prisma db push --skip-generate --accept-data-loss 2>&1; do
 done
 echo "=== DATABASE READY ==="
 
-echo "=== SEEDING DATABASE ==="
-node -e '
+# Only seed if explicitly enabled (for first deploy or reset)
+if [ "$ENABLE_BOOTSTRAP_SEED" = "true" ]; then
+  echo "=== SEEDING DATABASE (ENABLE_BOOTSTRAP_SEED=true) ==="
+  node -e '
 const { PrismaClient } = require("@prisma/client");
 const b = require("bcryptjs");
 const p = new PrismaClient();
 
 async function seed() {
-  const h = b.hashSync("admin123", 10);
-  const m = b.hashSync("manager123", 10);
-  const t = b.hashSync("brennan2026", 10);
+  const h = b.hashSync(process.env.ADMIN_PASSWORD || "admin123", 10);
+  const m = b.hashSync(process.env.MANAGER_PASSWORD || "manager123", 10);
+  const t = b.hashSync(process.env.TESTER_PASSWORD || "brennan2026", 10);
 
   const users = [
     ["system", "System", "system", h, "admin"],
@@ -67,6 +68,9 @@ async function seed() {
 
 seed().catch((e) => { console.error("Seed error:", e); process.exit(1); });
 '
+else
+  echo "=== SKIPPING SEED (set ENABLE_BOOTSTRAP_SEED=true to seed) ==="
+fi
 
 echo "=== STARTING SERVER ON PORT ${PORT:-3000} ==="
 exec npx next start -H 0.0.0.0 -p ${PORT:-3000}
