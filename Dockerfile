@@ -11,11 +11,7 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-
-# Generate Prisma client
 RUN npx prisma generate
-
-# Build Next.js (standalone output)
 RUN npm run build
 
 # --- Production ---
@@ -25,26 +21,21 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# Copy standalone build + static/public assets
+# Copy the FULL node_modules (not just standalone) so prisma + seed work
+COPY --from=deps /app/node_modules ./node_modules
+
+# Copy standalone server + static assets
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
-# Copy Prisma schema + seed for db push on startup
+# Copy Prisma schema for db push
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 
-# Copy seed dependencies
-COPY --from=builder /app/node_modules/bcryptjs ./node_modules/bcryptjs
-COPY --from=builder /app/node_modules/tsx ./node_modules/tsx
-COPY --from=builder /app/node_modules/esbuild ./node_modules/esbuild
-
-# Copy startup script
-COPY start.sh ./start.sh
-RUN chmod +x ./start.sh
+# Copy package.json for seed script
+COPY --from=builder /app/package.json ./package.json
 
 EXPOSE 3000
 
-CMD ["sh", "./start.sh"]
+# Single command: push schema, seed, start
+CMD sh -c "echo 'Pushing database schema...' && npx prisma db push --skip-generate --accept-data-loss && echo 'Seeding...' && node -e \"const{PrismaClient}=require('@prisma/client');const b=require('bcryptjs');const p=new PrismaClient();(async()=>{const h=b.hashSync('admin123',10);const m=b.hashSync('manager123',10);const t=b.hashSync('brennan2026',10);await p.user.upsert({where:{username:'system'},update:{},create:{username:'system',displayName:'System',email:'system@brennaninc.com',passwordHash:h,role:'admin'}});await p.user.upsert({where:{username:'admin'},update:{},create:{username:'admin',displayName:'Admin User',email:'admin@brennaninc.com',passwordHash:h,role:'admin'}});await p.user.upsert({where:{username:'jwood'},update:{},create:{username:'jwood',displayName:'J. Wood',email:'jwood@brennaninc.com',passwordHash:m,role:'rebate_manager'}});for(const[u,d]of[['scott','Scott'],['mark','Mark'],['dale','Dale'],['scrima','Scrima']]){await p.user.upsert({where:{username:u},update:{},create:{username:u,displayName:d,email:u+'@brennaninc.com',passwordHash:t,role:'rebate_manager'}})}for(const[c,n]of[['FAS','Fastenal'],['MOTION','Motion Industries'],['HSC','HSC Industrial Supply'],['AIT','AIT Supply'],['LGG','LGG Industrial'],['TIPCO','TIPCO Technologies']]){await p.distributor.upsert({where:{code:c},update:{},create:{code:c,name:n}})}for(const[c,n]of[['LINK-BELT','Link-Belt'],['CAT','Caterpillar'],['DEERE','John Deere'],['KOMATSU','Komatsu'],['VOLVO','Volvo'],['CASE','Case Construction'],['KUBOTA','Kubota'],['TEREX','Terex']]){await p.endUser.upsert({where:{code:c},update:{},create:{code:c,name:n}})}console.log('Seed complete.');await p.\$disconnect()})()\" && echo 'Starting server...' && node server.js"
