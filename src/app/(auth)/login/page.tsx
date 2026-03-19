@@ -47,9 +47,9 @@ function LoginForm() {
       <div className="text-center">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/brennan-logo.jpg"
+          src="/brennan-logo-full.png"
           alt="Brennan Industries"
-          className="mx-auto max-h-16"
+          className="mx-auto h-10 w-auto"
         />
         <p className="mt-3 text-sm text-gray-500">
           Rebate Management System
