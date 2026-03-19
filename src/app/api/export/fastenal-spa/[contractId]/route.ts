@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { getSessionUser } from "@/lib/auth/session";
-import XLSX from "xlsx";
+import * as XLSX from "xlsx";
 
 /**
  * GET /api/export/fastenal-spa/:contractId
