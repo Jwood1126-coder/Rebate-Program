@@ -3,7 +3,7 @@
 echo "=== WAITING FOR DATABASE ==="
 ATTEMPT=0
 MAX_ATTEMPTS=10
-until npx prisma db push --skip-generate 2>&1; do
+until npx prisma db push --skip-generate --accept-data-loss 2>&1; do
   ATTEMPT=$((ATTEMPT + 1))
   if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
     echo "ERROR: Could not connect to database after $MAX_ATTEMPTS attempts"
