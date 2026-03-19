@@ -35,8 +35,9 @@ export async function POST(request: NextRequest) {
   });
 
   if (existing) {
+    // Return existing item with a flag — allows callers like add-items to proceed
     return NextResponse.json(
-      { error: `Item number "${itemNumber}" already exists (Item #${existing.id})` },
+      { error: `Item number "${itemNumber}" already exists`, existing: { id: existing.id, itemNumber: existing.itemNumber } },
       { status: 409 },
     );
   }

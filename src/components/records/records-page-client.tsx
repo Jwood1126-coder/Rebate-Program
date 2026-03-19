@@ -211,12 +211,51 @@ function RecordsPageInner({
     }
   }
 
-  // Export current filtered view as CSV
+  // Export current filtered view as CSV with column selection
   const [exporting, setExporting] = useState(false);
+  const [showExportOptions, setShowExportOptions] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+  const availableExportColumns = [
+    { key: "item", label: "Item #", default: true },
+    { key: "price", label: "Rebate Price", default: true },
+    { key: "distributor", label: "Distributor", default: false },
+    { key: "contract", label: "Contract #", default: false },
+    { key: "endUser", label: "End User", default: false },
+    { key: "startDate", label: "Start Date", default: false },
+    { key: "endDate", label: "End Date", default: false },
+    { key: "status", label: "Status", default: false },
+    { key: "plan", label: "Plan Code", default: false },
+    { key: "id", label: "Record ID", default: false },
+    { key: "createdAt", label: "Created At", default: false },
+    { key: "updatedAt", label: "Updated At", default: false },
+  ];
+  const [exportColumns, setExportColumns] = useState<Set<string>>(
+    () => new Set(availableExportColumns.filter((c) => c.default).map((c) => c.key))
+  );
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setShowExportOptions(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  function toggleExportColumn(key: string) {
+    setExportColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   async function handleExport() {
     setExporting(true);
+    setShowExportOptions(false);
     try {
-      // Pass current filters to the CSV endpoint
       const exportParams = new URLSearchParams();
       if (filterDistributor) exportParams.set("distributor", filterDistributor);
       if (filterContract) exportParams.set("contract", filterContract);
@@ -226,6 +265,7 @@ function RecordsPageInner({
       if (filterDateFrom) exportParams.set("dateFrom", filterDateFrom);
       if (filterDateTo) exportParams.set("dateTo", filterDateTo);
       if (searchText) exportParams.set("search", searchText);
+      if (exportColumns.size > 0) exportParams.set("columns", [...exportColumns].join(","));
 
       const qs = exportParams.toString();
       const url = `/api/export/records-csv${qs ? `?${qs}` : ""}`;
@@ -303,13 +343,51 @@ function RecordsPageInner({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleExport}
-            disabled={exporting || totalCount === 0}
-            className="rounded-lg border border-brennan-border bg-white px-3 py-2 text-sm font-medium text-brennan-text shadow-sm transition-colors hover:bg-brennan-light disabled:opacity-50"
-          >
-            {exporting ? "Exporting..." : hasFilters ? "Export Filtered" : "Export CSV"}
-          </button>
+          <div className="relative" ref={exportRef}>
+            <button
+              onClick={() => setShowExportOptions(!showExportOptions)}
+              disabled={exporting || totalCount === 0}
+              className="rounded-lg border border-brennan-border bg-white px-3 py-2 text-sm font-medium text-brennan-text shadow-sm transition-colors hover:bg-brennan-light disabled:opacity-50 flex items-center gap-1"
+            >
+              {exporting ? "Exporting..." : "Export CSV"}
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            {showExportOptions && (
+              <div className="absolute right-0 mt-1 w-56 rounded-lg border border-brennan-border bg-white shadow-lg z-20">
+                <div className="px-3 py-2 border-b border-gray-100">
+                  <p className="text-xs font-semibold text-gray-600">Select columns to export</p>
+                </div>
+                <div className="max-h-64 overflow-y-auto px-3 py-2 space-y-1">
+                  {availableExportColumns.map((col) => (
+                    <label key={col.key} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:text-brennan-blue">
+                      <input
+                        type="checkbox"
+                        checked={exportColumns.has(col.key)}
+                        onChange={() => toggleExportColumn(col.key)}
+                        className="rounded border-gray-300"
+                      />
+                      {col.label}
+                    </label>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between border-t border-gray-100 px-3 py-2">
+                  <button
+                    onClick={() => setExportColumns(new Set(availableExportColumns.map((c) => c.key)))}
+                    className="text-xs text-brennan-blue hover:underline"
+                  >
+                    Select all
+                  </button>
+                  <button
+                    onClick={handleExport}
+                    disabled={exportColumns.size === 0}
+                    className="rounded bg-brennan-blue px-3 py-1 text-xs font-medium text-white hover:bg-brennan-dark disabled:opacity-50"
+                  >
+                    Download ({exportColumns.size} columns)
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
           <button
             onClick={handleNewRecord}
             className="rounded-lg bg-brennan-blue px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brennan-dark"

@@ -65,9 +65,15 @@ export async function POST(request: NextRequest) {
   const arrayBuffer = await file.arrayBuffer();
   const fileBuffer = Buffer.from(arrayBuffer);
 
-  // Check if column mapping exists — if not, return detected headers for inline configuration
+  // Check if column mapping exists
   const mapping = await getColumnMappingAsync(distributor.code);
-  if (!mapping) {
+
+  // Always detect headers so the user can review/confirm column mapping.
+  // If a saved mapping exists, merge it with auto-suggestions so the user
+  // sees the current mapping pre-filled but can adjust if file columns differ.
+  const confirmMapping = formData.get('confirmMapping') === 'true';
+
+  if (!mapping || !confirmMapping) {
     try {
       const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
       const firstSheetName = workbook.SheetNames[0];
@@ -84,7 +90,21 @@ export async function POST(request: NextRequest) {
       }
 
       const headers = Object.keys(rows[0]);
-      const suggested = suggestMappings(headers);
+      const autoSuggested = suggestMappings(headers);
+
+      // Merge saved mapping with auto-suggestions:
+      // saved mapping takes priority, auto-suggestions fill gaps
+      const suggested: Partial<Record<string, string>> = { ...autoSuggested };
+      if (mapping) {
+        // Overlay saved mapping — but only for columns that exist in this file
+        for (const [field, col] of Object.entries(mapping)) {
+          if (headers.includes(col as string)) {
+            suggested[field] = col as string;
+          }
+          // If saved column doesn't exist in file, keep the auto-suggested one
+        }
+      }
+
       const sampleData: Record<string, string[]> = {};
       for (const header of headers) {
         sampleData[header] = rows
@@ -98,6 +118,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         needsMapping: true,
+        hasSavedMapping: !!mapping,
         distributorId: distributor.id,
         distributorCode: distributor.code,
         distributorName: distributor.name,
@@ -109,7 +130,7 @@ export async function POST(request: NextRequest) {
       });
     } catch {
       return NextResponse.json({
-        error: `No column mapping configured for distributor "${distributor.code}" and the file could not be parsed for header detection.`,
+        error: `Could not parse the uploaded file for header detection. Please check the file format.`,
       }, { status: 422 });
     }
   }

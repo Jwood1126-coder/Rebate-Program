@@ -47,6 +47,102 @@ export interface ReviewPanelProps {
 }
 
 // ---------------------------------------------------------------------------
+// Issue card — extracted for reuse in contract-grouped and flat views
+// ---------------------------------------------------------------------------
+
+function renderIssueCard(
+  issue: DbIssue,
+  expandedIssueId: number | null,
+  resolvingIssue: number | null,
+  onExpandIssue: (id: number | null) => void,
+  onResolve: (issueId: number, resolution: string, note?: string) => void,
+  run: ReconciliationRunSummary | null,
+) {
+  const isExpanded = expandedIssueId === issue.id;
+  const cr = issue.claimRow;
+  return (
+    <div
+      key={issue.id}
+      className={`rounded-lg border transition-colors ${
+        issue.resolution
+          ? "border-gray-200 bg-gray-50/50 opacity-70"
+          : isExpanded
+            ? "border-brennan-blue/30 bg-brennan-light/20"
+            : "border-gray-200 bg-white hover:border-gray-300"
+      }`}
+    >
+      <div
+        className="flex items-start gap-3 px-4 py-3 cursor-pointer"
+        onClick={() => onExpandIssue(isExpanded ? null : issue.id)}
+      >
+        <svg className={`h-4 w-4 mt-0.5 text-gray-400 shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+        </svg>
+        <div className="shrink-0 w-20">
+          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide ${
+            issue.severity === "error"
+              ? "bg-red-100 text-red-700"
+              : issue.severity === "warning"
+                ? "bg-amber-100 text-amber-700"
+                : "bg-blue-50 text-blue-600"
+          }`}>
+            {issue.code}
+          </span>
+        </div>
+        <div className="flex-1 min-w-0">
+          {cr && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs mb-1">
+              {cr.itemNumber && <span className="font-mono font-semibold text-brennan-text">{cr.itemNumber}</span>}
+              {cr.deviatedPrice != null && (
+                <span className="text-gray-500">@ <span className="font-medium text-gray-700">${cr.deviatedPrice.toFixed(2)}</span></span>
+              )}
+              {cr.quantity != null && (
+                <span className="text-gray-500">qty <span className="font-medium text-gray-700">{cr.quantity}</span></span>
+              )}
+              <span className="text-gray-300">Row #{cr.rowNumber}</span>
+            </div>
+          )}
+          <div className="text-xs text-gray-500">
+            <span className="font-medium text-gray-600">{issue.category}</span>
+            <span className="mx-1.5 text-gray-300">&middot;</span>
+            <CommitConsequenceLabel issue={issue} />
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {issue.resolution ? (
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+              issue.resolution === "approved" ? "bg-green-100 text-green-700"
+                : issue.resolution === "rejected" ? "bg-red-100 text-red-700"
+                  : "bg-gray-100 text-gray-600"
+            }`}>
+              {issue.resolution}
+            </span>
+          ) : (
+            <>
+              {issue.masterRecordId && (
+                <a href={`/records?search=${encodeURIComponent(cr?.itemNumber || "")}`} target="_blank" rel="noopener noreferrer" className="rounded border border-gray-200 px-1.5 py-0.5 text-[10px] text-gray-500 hover:bg-gray-50">Search</a>
+              )}
+              {!(run?.status === "committed") && (
+                <>
+                  <button onClick={(e) => { e.stopPropagation(); onResolve(issue.id, "approved"); }} disabled={resolvingIssue === issue.id} className="rounded border border-green-200 px-1.5 py-0.5 text-[10px] font-medium text-green-700 hover:bg-green-50 disabled:opacity-50">Approve</button>
+                  <button onClick={(e) => { e.stopPropagation(); onResolve(issue.id, "rejected"); }} disabled={resolvingIssue === issue.id} className="rounded border border-red-200 px-1.5 py-0.5 text-[10px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">Reject</button>
+                  <button onClick={(e) => { e.stopPropagation(); onResolve(issue.id, "dismissed"); }} disabled={resolvingIssue === issue.id} className="rounded border border-gray-200 px-1.5 py-0.5 text-[10px] text-gray-500 hover:bg-gray-50 disabled:opacity-50">Dismiss</button>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+      {isExpanded && (
+        <div className="border-t border-gray-100 bg-gray-50/50 px-4 py-3">
+          <IssueDetailPanel issue={issue} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Review Panel component
 // ---------------------------------------------------------------------------
 
@@ -191,139 +287,84 @@ export function ReviewPanel({
               </div>
             )}
 
-            {/* Issues list */}
-            {issues.length > 0 && (
-              <div className="space-y-2">
-                {issues.map((issue) => {
-                  const isExpanded = expandedIssueId === issue.id;
-                  const cr = issue.claimRow;
-                  return (
-                    <div
-                      key={issue.id}
-                      className={`rounded-lg border transition-colors ${
-                        issue.resolution
-                          ? "border-gray-200 bg-gray-50/50 opacity-70"
-                          : isExpanded
-                            ? "border-brennan-blue/30 bg-brennan-light/20"
-                            : "border-gray-200 bg-white hover:border-gray-300"
-                      }`}
-                    >
-                      {/* Summary row — always visible */}
-                      <div
-                        className="flex items-start gap-3 px-4 py-3 cursor-pointer"
-                        onClick={() => onExpandIssue(isExpanded ? null : issue.id)}
-                      >
-                        {/* Expand chevron */}
-                        <svg className={`h-4 w-4 mt-0.5 text-gray-400 shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-                        </svg>
+            {/* Contract-grouped view */}
+            {(() => {
+              // Group issues and matched rows by contract number
+              const issuesByContract = new Map<string, DbIssue[]>();
+              const matchedByContract = new Map<string, MatchedRow[]>();
 
-                        {/* Code + severity badge */}
-                        <div className="shrink-0 w-20">
-                          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide ${
-                            issue.severity === "error"
-                              ? "bg-red-100 text-red-700"
-                              : issue.severity === "warning"
-                                ? "bg-amber-100 text-amber-700"
-                                : "bg-blue-50 text-blue-600"
-                          }`}>
-                            {issue.code}
-                          </span>
-                        </div>
+              for (const issue of issues) {
+                const cn = issue.claimRow?.contractNumber ?? "Unknown Contract";
+                if (!issuesByContract.has(cn)) issuesByContract.set(cn, []);
+                issuesByContract.get(cn)!.push(issue);
+              }
+              for (const row of matchedRows) {
+                const cn = row.contractNumber ?? "Unknown Contract";
+                if (!matchedByContract.has(cn)) matchedByContract.set(cn, []);
+                matchedByContract.get(cn)!.push(row);
+              }
 
-                        {/* Main content: claim line data + description */}
-                        <div className="flex-1 min-w-0">
-                          {cr && (
-                            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs mb-1">
-                              {cr.itemNumber && (
-                                <span className="font-mono font-semibold text-brennan-text">{cr.itemNumber}</span>
+              // Merge all contract numbers from both sources
+              const allContracts = [...new Set([...issuesByContract.keys(), ...matchedByContract.keys()])].sort();
+
+              // If only one contract, skip the grouping headers
+              if (allContracts.length <= 1) {
+                return (
+                  <>
+                    {matchedRows.length > 0 && <MatchedRowsSection rows={matchedRows} />}
+                    {issues.length > 0 && (
+                      <div className="space-y-2">
+                        {issues.map((issue) => renderIssueCard(issue, expandedIssueId, resolvingIssue, onExpandIssue, onResolve, run))}
+                      </div>
+                    )}
+                  </>
+                );
+              }
+
+              // Multiple contracts: render grouped
+              return (
+                <div className="space-y-4">
+                  {allContracts.map((cn) => {
+                    const contractIssues = issuesByContract.get(cn) || [];
+                    const contractMatched = matchedByContract.get(cn) || [];
+                    const pendingCount = contractIssues.filter((i) => !i.resolution).length;
+                    const errorCount = contractIssues.filter((i) => i.severity === "error" && !i.resolution).length;
+
+                    return (
+                      <div key={cn} className="rounded-lg border border-gray-200 overflow-hidden">
+                        <div className="flex items-center justify-between bg-gray-50 px-4 py-2.5 border-b border-gray-200">
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-bold text-brennan-text">Contract {cn}</span>
+                            <span className="text-xs text-gray-500">
+                              {contractMatched.length} matched
+                              {contractIssues.length > 0 && (
+                                <>, <span className={errorCount > 0 ? "text-red-600 font-medium" : "text-amber-600 font-medium"}>{contractIssues.length} exception{contractIssues.length !== 1 ? "s" : ""}</span></>
                               )}
-                              {cr.contractNumber && (
-                                <span className="text-gray-500">
-                                  Contract <span className="font-medium text-gray-700">{cr.contractNumber}</span>
-                                </span>
+                              {pendingCount > 0 && (
+                                <> (<span className="font-medium">{pendingCount} pending</span>)</>
                               )}
-                              {cr.deviatedPrice != null && (
-                                <span className="text-gray-500">
-                                  @ <span className="font-medium text-gray-700">${cr.deviatedPrice.toFixed(2)}</span>
-                                </span>
-                              )}
-                              {cr.quantity != null && (
-                                <span className="text-gray-500">
-                                  qty <span className="font-medium text-gray-700">{cr.quantity}</span>
-                                </span>
-                              )}
-                              <span className="text-gray-300">Row #{cr.rowNumber}</span>
-                            </div>
-                          )}
-                          {/* Category + consequence */}
-                          <div className="text-xs text-gray-500">
-                            <span className="font-medium text-gray-600">{issue.category}</span>
-                            <span className="mx-1.5 text-gray-300">&middot;</span>
-                            <CommitConsequenceLabel issue={issue} />
+                            </span>
                           </div>
-                        </div>
-
-                        {/* Status + actions */}
-                        <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          <IssueContextLinks issue={issue} />
-                          {issue.resolution ? (
-                            <ResolutionBadge resolution={issue.resolution} />
-                          ) : (
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={() => onResolve(issue.id, "approved")}
-                                disabled={resolvingIssue === issue.id}
-                                className="rounded bg-green-50 border border-green-200 px-2 py-0.5 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
-                                title="Approve this claim line"
-                              >
-                                Approve
-                              </button>
-                              <button
-                                onClick={() => onResolve(issue.id, "rejected")}
-                                disabled={resolvingIssue === issue.id}
-                                className="rounded bg-red-50 border border-red-200 px-2 py-0.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
-                                title="Reject this claim line"
-                              >
-                                Reject
-                              </button>
-                              <button
-                                onClick={() => onResolve(issue.id, "dismissed")}
-                                disabled={resolvingIssue === issue.id}
-                                className="rounded bg-gray-50 border border-gray-200 px-2 py-0.5 text-xs font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-50"
-                                title="Dismiss — no action needed"
-                              >
-                                Dismiss
-                              </button>
-                              {resolvingIssue === issue.id && (
-                                <span className="text-gray-400 ml-1">...</span>
-                              )}
-                            </div>
+                          {contractMatched.length > 0 && contractIssues.length === 0 && (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">All OK</span>
                           )}
+                        </div>
+                        <div className="p-3 space-y-2">
+                          {contractMatched.length > 0 && <MatchedRowsSection rows={contractMatched} />}
+                          {contractIssues.map((issue) => renderIssueCard(issue, expandedIssueId, resolvingIssue, onExpandIssue, onResolve, run))}
                         </div>
                       </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
-                      {/* Expanded detail — claim data + master data comparison */}
-                      {isExpanded && (
-                        <div className="border-t border-gray-200">
-                          <IssueDetailPanel issue={issue} />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
 
-            {issues.length === 0 && !loading && (
+            {issues.length === 0 && matchedRows.length === 0 && !loading && (
               <div className="text-center py-6">
                 <p className="text-sm text-gray-500">No exceptions for this run.</p>
               </div>
-            )}
-
-            {/* Matched rows — clean claim lines that verified OK */}
-            {matchedRows.length > 0 && (
-              <MatchedRowsSection rows={matchedRows} />
             )}
           </>
         )}
@@ -481,7 +522,7 @@ function IssueDetailPanel({ issue }: { issue: DbIssue }) {
               <DetailField label="Contract" value={cr.contractNumber} />
               <DetailField label="Plan Code" value={cr.planCode} />
               <DetailField label="Item" value={cr.itemNumber} />
-              <DetailField label="Claimed Price" value={cr.deviatedPrice != null ? `$${cr.deviatedPrice.toFixed(2)}` : null} />
+              <DetailField label="Open Net Price" value={cr.deviatedPrice != null ? `$${cr.deviatedPrice.toFixed(2)}` : null} />
               <DetailField label="Quantity" value={cr.quantity != null ? String(cr.quantity) : null} />
               {cr.claimedAmount != null && <DetailField label="Line Amount" value={`$${cr.claimedAmount.toFixed(2)}`} />}
               {cr.transactionDate && <DetailField label="Trans. Date" value={new Date(cr.transactionDate).toLocaleDateString()} />}

@@ -310,7 +310,7 @@ const DEFAULT_STANDARD_FIELDS: Record<string, StandardFieldInfo> = {
   contractNumber: { label: "Contract Number", required: true, group: "Required" },
   itemNumber: { label: "Item / Part Number", required: true, group: "Required" },
   transactionDate: { label: "Transaction / Ship Date", required: true, group: "Required" },
-  deviatedPrice: { label: "Deviated (Contract) Price", required: true, group: "Required" },
+  deviatedPrice: { label: "Open Net Price", required: true, group: "Required" },
   quantity: { label: "Quantity", required: true, group: "Required" },
   claimedAmount: { label: "Claimed Rebate Amount", required: false, group: "Recommended" },
   standardPrice: { label: "Standard / List Price", required: false, group: "Recommended" },

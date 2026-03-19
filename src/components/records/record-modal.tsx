@@ -64,6 +64,12 @@ export function RecordModal({ open, onClose, record }: RecordModalProps) {
     endDate: "",
   });
 
+  // New item creation
+  const [showNewItem, setShowNewItem] = useState(false);
+  const [newItemNumber, setNewItemNumber] = useState("");
+  const [newItemDesc, setNewItemDesc] = useState("");
+  const [creatingItem, setCreatingItem] = useState(false);
+
   // Derive selected plan context
   const selectedPlan = useMemo(
     () => plans.find((p) => p.id === formData.rebatePlanId),
@@ -344,18 +350,86 @@ export function RecordModal({ open, onClose, record }: RecordModalProps) {
               <label className="mb-1 block text-xs font-medium text-gray-600">
                 Item <span className="text-red-500">*</span>
               </label>
-              <SearchableSelect
-                options={items.map((item) => ({
-                  value: String(item.id),
-                  label: `${item.itemNumber}${item.description ? ` — ${item.description}` : ""}`,
-                }))}
-                value={formData.itemId ? String(formData.itemId) : ""}
-                onChange={(v) =>
-                  setFormData({ ...formData, itemId: v ? Number(v) : 0 })
-                }
-                placeholder="Select an item..."
-                disabled={isEdit}
-              />
+              {!showNewItem ? (
+                <div className="space-y-1">
+                  <SearchableSelect
+                    options={items.map((item) => ({
+                      value: String(item.id),
+                      label: `${item.itemNumber}${item.description ? ` — ${item.description}` : ""}`,
+                    }))}
+                    value={formData.itemId ? String(formData.itemId) : ""}
+                    onChange={(v) =>
+                      setFormData({ ...formData, itemId: v ? Number(v) : 0 })
+                    }
+                    placeholder="Select an item..."
+                    disabled={isEdit}
+                  />
+                  {!isEdit && (
+                    <button
+                      type="button"
+                      onClick={() => setShowNewItem(true)}
+                      className="text-xs text-brennan-blue hover:underline"
+                    >
+                      + Create new item
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2 rounded border border-brennan-blue/20 bg-brennan-light/50 p-2">
+                  <input
+                    type="text"
+                    value={newItemNumber}
+                    onChange={(e) => setNewItemNumber(e.target.value)}
+                    placeholder="Part number (e.g. 7000-12)"
+                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-brennan-blue focus:outline-none"
+                  />
+                  <input
+                    type="text"
+                    value={newItemDesc}
+                    onChange={(e) => setNewItemDesc(e.target.value)}
+                    placeholder="Description (optional)"
+                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-brennan-blue focus:outline-none"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={creatingItem || !newItemNumber.trim()}
+                      onClick={async () => {
+                        setCreatingItem(true);
+                        const res = await fetch("/api/items", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ itemNumber: newItemNumber.trim(), description: newItemDesc.trim() || null }),
+                        });
+                        const data = await res.json();
+                        const newId = data.id || data.existing?.id;
+                        if (newId) {
+                          // Refresh items list and select the new one
+                          const itemsRes = await fetch("/api/items");
+                          setItems(await itemsRes.json());
+                          setFormData({ ...formData, itemId: newId });
+                          setShowNewItem(false);
+                          setNewItemNumber("");
+                          setNewItemDesc("");
+                        } else {
+                          setError(data.error || "Failed to create item");
+                        }
+                        setCreatingItem(false);
+                      }}
+                      className="rounded bg-brennan-blue px-3 py-1 text-xs font-medium text-white hover:bg-brennan-dark disabled:opacity-50"
+                    >
+                      {creatingItem ? "Creating..." : "Create Item"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowNewItem(false); setNewItemNumber(""); setNewItemDesc(""); }}
+                      className="text-xs text-gray-500 hover:text-gray-700"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Rebate Price */}

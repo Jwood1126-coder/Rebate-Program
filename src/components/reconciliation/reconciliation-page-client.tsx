@@ -229,7 +229,7 @@ export default function ReconciliationPageClient({
 
   const hasActiveFilters = filterDistributor || filterStatus || filterDateFrom || filterDateTo || filterSearch;
 
-  async function handleUpload() {
+  async function handleUpload(confirmed = false) {
     if (!selectedFile || !selectedDistributorId || !claimPeriod) return;
 
     setUploading(true);
@@ -239,6 +239,9 @@ export default function ReconciliationPageClient({
     formData.append("file", selectedFile);
     formData.append("distributorId", selectedDistributorId);
     formData.append("claimPeriod", claimPeriod);
+    if (confirmed) {
+      formData.append("confirmMapping", "true");
+    }
 
     try {
       const res = await fetch("/api/reconciliation/upload", {
@@ -348,7 +351,7 @@ export default function ReconciliationPageClient({
     if (wasPos) {
       await handlePosUpload();
     } else {
-      await handleUpload();
+      await handleUpload(true);
     }
   }
 
@@ -566,9 +569,9 @@ export default function ReconciliationPageClient({
                             scrollTo(uploadPanelRef);
                           }
                         }}
-                        className="rounded bg-brennan-blue px-3 py-1 text-xs font-medium text-white hover:bg-brennan-blue/90"
+                        className="rounded border border-brennan-blue px-3 py-1 text-xs font-medium text-brennan-blue hover:bg-brennan-light"
                       >
-                        Upload
+                        Start →
                       </button>
                     )}
                     {item.status === "needs_validation" && item.run && (
@@ -623,6 +626,17 @@ export default function ReconciliationPageClient({
           <div className="border-b border-brennan-border px-5 py-3">
             <h2 className="text-base font-semibold text-brennan-text">New Reconciliation Run</h2>
             <p className="text-xs text-gray-400 mt-0.5">Upload the claim/debit file and optionally attach the POS report in one step</p>
+            <div className="mt-2 rounded border border-blue-200 bg-blue-50 px-3 py-2">
+              <p className="text-xs font-medium text-blue-700 mb-1">Required fields in claim file:</p>
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-blue-600">
+                <span>• Contract #</span>
+                <span>• Part Number / Item #</span>
+                <span>• Open Net Price</span>
+                <span>• Quantity</span>
+                <span>• Transaction Date</span>
+              </div>
+              <p className="mt-1 text-[10px] text-blue-500">Column names are matched via the distributor&apos;s column mapping configuration.</p>
+            </div>
           </div>
 
           <div className="px-5 py-4 space-y-4">
@@ -770,7 +784,7 @@ export default function ReconciliationPageClient({
                 Cancel
               </button>
               <button
-                onClick={handleUpload}
+                onClick={() => handleUpload()}
                 disabled={!selectedFile || !selectedDistributorId || !claimPeriod || uploading}
                 className="rounded-lg bg-brennan-blue px-4 py-2 text-sm font-medium text-white hover:bg-brennan-blue/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >

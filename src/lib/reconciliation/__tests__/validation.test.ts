@@ -623,6 +623,7 @@ describe('validateRun effective-date matching', () => {
       select: {
         id: true,
         contractNumber: true,
+        customerNumber: true,
         startDate: true,
         endDate: true,
         status: true,

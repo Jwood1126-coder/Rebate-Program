@@ -24,8 +24,12 @@ function buildExportWhere(params: URLSearchParams): Prisma.RebateRecordWhereInpu
     hasContractFilter = true;
   }
 
+  const endUserCode = params.get("endUserCode");
   const endUser = params.get("endUser");
-  if (endUser) {
+  if (endUserCode) {
+    contractWhere.endUser = { code: endUserCode };
+    hasContractFilter = true;
+  } else if (endUser) {
     contractWhere.endUser = { name: endUser };
     hasContractFilter = true;
   }
@@ -115,39 +119,38 @@ export async function GET(request: NextRequest) {
     orderBy: [{ rebatePlanId: "asc" }, { startDate: "asc" }],
   });
 
-  // Build CSV
-  const headers = [
-    "ID",
-    "Distributor",
-    "Contract #",
-    "Plan Code",
-    "End User",
-    "Item #",
-    "Rebate Price",
-    "Start Date",
-    "End Date",
-    "Status",
-    "Created At",
-    "Updated At",
+  // Available columns — order matters for default output
+  const allColumns: { key: string; header: string; getValue: (r: typeof records[0]) => string | number }[] = [
+    { key: "item", header: "Item #", getValue: (r) => csvEscape(r.item.itemNumber) },
+    { key: "price", header: "Rebate Price", getValue: (r) => Number(r.rebatePrice) },
+    { key: "distributor", header: "Distributor", getValue: (r) => csvEscape(r.rebatePlan.contract.distributor.code) },
+    { key: "contract", header: "Contract #", getValue: (r) => csvEscape(r.rebatePlan.contract.contractNumber) },
+    { key: "endUser", header: "End User", getValue: (r) => csvEscape(r.rebatePlan.contract.endUser?.name ?? "") },
+    { key: "plan", header: "Plan Code", getValue: (r) => csvEscape(r.rebatePlan.planCode) },
+    { key: "startDate", header: "Start Date", getValue: (r) => r.startDate.toISOString().split("T")[0] },
+    { key: "endDate", header: "End Date", getValue: (r) => r.endDate ? r.endDate.toISOString().split("T")[0] : "" },
+    { key: "status", header: "Status", getValue: (r) => r.status },
+    { key: "id", header: "ID", getValue: (r) => r.id },
+    { key: "createdAt", header: "Created At", getValue: (r) => r.createdAt.toISOString() },
+    { key: "updatedAt", header: "Updated At", getValue: (r) => r.updatedAt.toISOString() },
   ];
 
+  // Default columns: Item # and Rebate Price
+  const defaultColumns = ["item", "price"];
+  const requestedColumns = searchParams.get("columns")?.split(",").filter(Boolean);
+  const selectedKeys = requestedColumns && requestedColumns.length > 0 ? requestedColumns : defaultColumns;
+  const columns = allColumns.filter((c) => selectedKeys.includes(c.key));
+
+  // If no valid columns matched, fall back to defaults
+  if (columns.length === 0) {
+    columns.push(...allColumns.filter((c) => defaultColumns.includes(c.key)));
+  }
+
+  const headers = columns.map((c) => c.header);
   const lines: string[] = [headers.join(",")];
 
   for (const r of records) {
-    const row = [
-      r.id,
-      csvEscape(r.rebatePlan.contract.distributor.code),
-      csvEscape(r.rebatePlan.contract.contractNumber),
-      csvEscape(r.rebatePlan.planCode),
-      csvEscape(r.rebatePlan.contract.endUser?.name ?? ""),
-      csvEscape(r.item.itemNumber),
-      Number(r.rebatePrice),
-      r.startDate.toISOString().split("T")[0],
-      r.endDate ? r.endDate.toISOString().split("T")[0] : "",
-      r.status,
-      r.createdAt.toISOString(),
-      r.updatedAt.toISOString(),
-    ];
+    const row = columns.map((c) => c.getValue(r));
     lines.push(row.join(","));
   }
 

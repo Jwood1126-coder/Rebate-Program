@@ -4,6 +4,70 @@ All notable changes to this project are documented in this file, grouped by sess
 
 ---
 
+## 2026-03-19 — Manual Add Items, Fastenal SPA Import/Export, Reconciliation UX, Export Improvements
+
+### Manual Add Items on Contract Detail
+- "Update Contract" button is now a dropdown: **Upload File** or **Add Items Manually**
+- Inline multi-row form: Part Number + Price + Description
+- Multi-plan contracts require explicit plan selection (no silent default)
+- Warnings from validation are surfaced — user must acknowledge before proceeding
+- Partial failures shown clearly (no false "all saved" message)
+- Auto-creates items if they don't exist (find-or-create)
+
+### Create New Items from Record Modal
+- "+ Create new item" link below item selector
+- Inline form: part number + description → Create → auto-selects
+- Items API returns existing item on 409 conflict
+
+### Fastenal SPA Import/Export
+- **Import**: Auto-detects Fastenal SPA form format (header rows 1-20, line items at row 22+)
+- Extracts metadata: Agreement #, End User, Effective Date
+- Parses Supplier P/N (column B) and Agreement Price (column G)
+- Works with real Fastenal SPA files (verified with Bayshore SPA)
+- Round-trip tested: Export → Re-import preserves all items and prices
+- **Export**: "Export Fastenal SPA" button on FAS contract detail pages
+- Generates Excel matching exact Fastenal SPA layout
+- Only includes current operative records (active, started, not expired/superseded)
+- Server-side restricted to FAS contracts only
+- Filename: `{EndUser} SPA {date}.xlsx`
+
+### "Deviated Price" → "Open Net Price"
+- All user-facing labels updated across the system
+- Auto-suggestion patterns match both old ("Deviated Price") and new ("Open Net Price") column names
+- Internal field name `deviatedPrice` unchanged (no migration needed)
+
+### Export Column Picker
+- Records page Export CSV button is now a dropdown with column checkboxes
+- Default: Item # and Rebate Price only
+- "Select all" link for full export
+- API accepts `?columns=item,price,contract` parameter
+
+### Reconciliation UX — Contract Grouping
+- Exception review groups issues and matched rows by contract number
+- Per-contract headers: "Contract 100001 — 12 matched, 3 exceptions (2 pending)"
+- "All OK" badge for contracts with zero exceptions
+- Single-contract claims skip grouping (flat view)
+
+### Reconciliation UX — Column Mapping Always Shown
+- Upload now always shows column mapping review before processing
+- Saved mapping merged with auto-suggestions from file headers
+- User can adjust mapping every time — fixes errors when file columns change
+- Required fields info box on upload panel
+
+### Reconciliation UX — Button Cleanup
+- Per-distributor "Upload" button changed to "Start →" (less redundant)
+
+### Data Scoping Improvements
+- Contract detail → Records deep link includes distributor + endUser
+- CSV export uses endUserCode (unique) when available, falls back to name
+- Export route supports `endUserCode` param for precise scoping
+
+### Test Coverage
+- 335 tests across 19 files
+- New: SPA export filtering (7), CSV/Records scoping (5), multi-plan guard (2), deep-link scoping (2)
+
+---
+
 ## 2026-03-18 — Action Reversibility Audit
 
 ### Contract Approval Undo

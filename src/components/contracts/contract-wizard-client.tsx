@@ -1130,7 +1130,7 @@ function ManualMode({
                   )}
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-xs text-gray-500 mb-1">Deviated Price</label>
+                  <label className="block text-xs text-gray-500 mb-1">Open Net Price</label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
                     <input type="number" step="0.01" min="0" value={linePrice} onChange={e => setLinePrice(e.target.value)} placeholder="0.00"
@@ -1164,7 +1164,7 @@ function ManualMode({
                       <th className="px-3 py-2">#</th>
                       <th className="px-3 py-2">Item Number</th>
                       <th className="px-3 py-2">Description</th>
-                      <th className="px-3 py-2 text-right">Deviated Price</th>
+                      <th className="px-3 py-2 text-right">Open Net Price</th>
                       <th className="px-3 py-2">Start</th>
                       <th className="px-3 py-2">End</th>
                       <th className="px-3 py-2"></th>
@@ -1243,7 +1243,7 @@ function ManualMode({
                       <thead>
                         <tr className="bg-gray-50 text-left text-gray-500 uppercase tracking-wider">
                           <th className="px-3 py-2">Item</th>
-                          <th className="px-3 py-2 text-right">Deviated Price</th>
+                          <th className="px-3 py-2 text-right">Open Net Price</th>
                           <th className="px-3 py-2">Start</th>
                           <th className="px-3 py-2">End</th>
                         </tr>

@@ -4,7 +4,7 @@
 //
 // Expected columns (flexible header matching):
 //   Distributor Code | End User Code | End User Name | Plan Code | Discount Type |
-//   Item Number | Deviated Price | Start Date | End Date | Description
+//   Item Number | Open Net Price | Start Date | End Date | Description
 //
 // Rows are grouped by (distributor + end user) to create one contract each.
 // Contract numbers are auto-generated (next available 6-digit number).
@@ -524,6 +524,7 @@ export interface SimpleLineItem {
   itemNumber: string;
   price: number;
   rowNum: number;
+  description?: string;
 }
 
 export interface SimpleParseResult {
@@ -567,9 +568,103 @@ const PRICE_PATTERNS = [
   /\bcost$/i,
 ];
 
+// ---------------------------------------------------------------------------
+// Fastenal SPA format detection and parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect whether a worksheet is a Fastenal SPA form.
+ * Checks for "Special Pricing Agreement" in the header area (rows 1-5).
+ */
+function isFastenalSPA(ws: XLSX.WorkSheet): boolean {
+  try {
+    // Check cells A1-H5 for the SPA title
+    const cols = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+    for (let r = 1; r <= 5; r++) {
+      for (const c of cols) {
+        const cell = ws[`${c}${r}`];
+        if (cell && typeof cell.v === 'string' && /special pricing agreement/i.test(cell.v)) {
+          return true;
+        }
+      }
+    }
+  } catch {
+    // If worksheet structure doesn't support cell access, it's not an SPA
+  }
+  return false;
+}
+
+/**
+ * Extract metadata from a Fastenal SPA header (rows 1-20).
+ */
+function extractSPAMetadata(ws: XLSX.WorkSheet): {
+  agreementNumber: string | null;
+  endUser: string | null;
+  effectiveDate: string | null;
+} {
+  const getCell = (ref: string) => {
+    const cell = ws[ref];
+    return cell ? String(cell.v).trim() : null;
+  };
+  return {
+    agreementNumber: getCell('D6'),
+    endUser: getCell('D10'),
+    effectiveDate: getCell('D7'),
+  };
+}
+
+/**
+ * Parse line items from a Fastenal SPA worksheet.
+ * Headers are in row 22, data starts at row 23.
+ * Supplier P/N is in column B, Agreement Price in column G.
+ */
+function parseSPALineItems(ws: XLSX.WorkSheet): SimpleParseResult {
+  const items: SimpleLineItem[] = [];
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const seenParts = new Set<string>();
+
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+
+  for (let r = 22; r <= range.e.r; r++) { // Row 23+ (0-indexed = 22+)
+    const supplierCell = ws[XLSX.utils.encode_cell({ r, c: 1 })]; // Column B
+    const priceCell = ws[XLSX.utils.encode_cell({ r, c: 6 })];    // Column G
+    const descCell = ws[XLSX.utils.encode_cell({ r, c: 3 })];     // Column D
+
+    const itemNumber = supplierCell ? String(supplierCell.v).trim() : '';
+    if (!itemNumber) continue; // Skip empty rows
+
+    const priceVal = priceCell ? priceCell.v : null;
+    const priceStr = priceVal != null ? String(priceVal).replace(/[$,\s]/g, '') : '';
+    const price = parseFloat(priceStr);
+
+    if (isNaN(price) || price < 0) {
+      errors.push(`Row ${r + 1}: Invalid price for "${itemNumber}"`);
+      continue;
+    }
+
+    if (seenParts.has(itemNumber.toUpperCase())) {
+      warnings.push(`Row ${r + 1}: Duplicate item "${itemNumber}" — only the first occurrence will be used`);
+      continue;
+    }
+    seenParts.add(itemNumber.toUpperCase());
+
+    const description = descCell ? String(descCell.v).trim() : '';
+
+    items.push({ itemNumber, price, rowNum: r + 1, description: description || undefined });
+  }
+
+  if (items.length === 0) {
+    errors.push('No valid line items found in the SPA file (expected data starting at row 23, column B).');
+  }
+
+  return { items, errors, warnings };
+}
+
 /**
  * Read headers from a contract file and suggest column mappings.
  * Called before parsing — allows the user to confirm/correct the mapping.
+ * Detects Fastenal SPA format and returns pre-mapped results for those files.
  */
 export function readContractFileHeaders(
   fileBuffer: Buffer,
@@ -587,6 +682,29 @@ export function readContractFileHeaders(
     return { error: `Failed to parse file "${fileName}".` };
   }
 
+  // Detect Fastenal SPA format
+  if (isFastenalSPA(worksheet)) {
+    const metadata = extractSPAMetadata(worksheet);
+    const parsed = parseSPALineItems(worksheet);
+    const sampleItems = parsed.items.slice(0, 5).map(item => ({
+      'Supplier P/N': item.itemNumber,
+      'Agreement Price': String(item.price),
+      'Description': item.description || '',
+    }));
+    return {
+      headers: ['Supplier P/N', 'Agreement Price'],
+      sampleRows: sampleItems,
+      suggestedMapping: {
+        itemNumberColumn: 'Supplier P/N',
+        priceColumn: 'Agreement Price',
+      },
+      rowCount: parsed.items.length,
+      fastenalSPA: true,
+      spaMetadata: metadata,
+    } as FileHeadersResult & { fastenalSPA: boolean; spaMetadata: typeof metadata };
+  }
+
+  // Standard flat file parsing
   const rawRows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(worksheet, {
     defval: null,
     raw: false,
@@ -644,6 +762,11 @@ export function parseSimpleContractFile(
     worksheet = workbook.Sheets[firstSheetName];
   } catch {
     return { items: [], errors: [`Failed to parse file "${fileName}".`], warnings: [] };
+  }
+
+  // Detect Fastenal SPA format — use dedicated parser
+  if (isFastenalSPA(worksheet)) {
+    return parseSPALineItems(worksheet);
   }
 
   const rawRows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(worksheet, {

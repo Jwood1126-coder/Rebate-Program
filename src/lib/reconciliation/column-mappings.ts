@@ -24,7 +24,7 @@ export const HARDCODED_MAPPINGS: Record<string, ColumnMapping> = {
       contractNumber: 'Contract ID',
       itemNumber: 'Vendor Item',
       transactionDate: 'Date',
-      deviatedPrice: 'Deviated Price',
+      deviatedPrice: 'Open Net Price',
       quantity: 'QTY',
       claimedAmount: 'Extended Discount Owed',
       standardPrice: 'Current Vendor Price',

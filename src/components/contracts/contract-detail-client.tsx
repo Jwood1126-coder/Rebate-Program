@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -107,6 +107,129 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
   const [approving, setApproving] = useState(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
 
+  // Update dropdown state
+  const [updateDropdownOpen, setUpdateDropdownOpen] = useState(false);
+  const updateDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Add items modal state
+  const [showAddItems, setShowAddItems] = useState(false);
+  const [addItemRows, setAddItemRows] = useState<{ itemNumber: string; price: string; description: string }[]>([
+    { itemNumber: "", price: "", description: "" },
+  ]);
+  const [addItemSaving, setAddItemSaving] = useState(false);
+  const [addItemError, setAddItemError] = useState<string | null>(null);
+  const [addItemSuccess, setAddItemSuccess] = useState<string | null>(null);
+  const [addItemWarnings, setAddItemWarnings] = useState<string[]>([]);
+  const [addItemPendingConfirm, setAddItemPendingConfirm] = useState(false);
+  const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
+  const isMultiPlan = plans.length > 1;
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (updateDropdownRef.current && !updateDropdownRef.current.contains(e.target as Node)) {
+        setUpdateDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Get the target plan ID for adding items
+  const defaultPlanId = plans.length === 1 ? plans[0].id : null;
+
+  async function handleAddItems(forceConfirm = false) {
+    const targetPlanId = isMultiPlan ? selectedPlanId : defaultPlanId;
+    if (!targetPlanId) {
+      setAddItemError(isMultiPlan ? "Please select a plan first." : "No plan exists for this contract.");
+      return;
+    }
+    const validRows = addItemRows.filter((r) => r.itemNumber.trim() && r.price.trim());
+    if (validRows.length === 0) {
+      setAddItemError("Enter at least one item with a part number and price.");
+      return;
+    }
+    setAddItemSaving(true);
+    setAddItemError(null);
+    setAddItemSuccess(null);
+    if (!forceConfirm) {
+      setAddItemWarnings([]);
+      setAddItemPendingConfirm(false);
+    }
+
+    let created = 0;
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    for (const row of validRows) {
+      // Find or create item
+      const itemRes = await fetch("/api/items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemNumber: row.itemNumber.trim(), description: row.description.trim() || null }),
+      });
+      const itemData = await itemRes.json();
+      const itemId = itemData.id || itemData.existing?.id;
+      if (!itemId) {
+        errors.push(`${row.itemNumber}: failed to create item`);
+        continue;
+      }
+
+      // Create record — first pass without confirmWarnings to surface warnings
+      const recRes = await fetch("/api/records", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rebatePlanId: targetPlanId,
+          itemId,
+          rebatePrice: row.price,
+          startDate: new Date().toISOString().split("T")[0],
+          endDate: null,
+          ...(forceConfirm ? { confirmWarnings: true } : {}),
+        }),
+      });
+      const recData = await recRes.json();
+
+      if (recRes.ok && recData.needsConfirmation) {
+        // Record API returned warnings — collect them
+        const warnMsgs = (recData.warnings || []).map((w: { message: string }) => `${row.itemNumber}: ${w.message}`);
+        warnings.push(...warnMsgs);
+      } else if (recRes.ok) {
+        created++;
+      } else {
+        errors.push(`${row.itemNumber}: ${recData.error || "failed"}`);
+      }
+    }
+
+    setAddItemSaving(false);
+
+    // If we got warnings on first pass, show them and ask for confirmation
+    if (warnings.length > 0 && !forceConfirm) {
+      setAddItemWarnings(warnings);
+      setAddItemPendingConfirm(true);
+      if (created > 0) {
+        setAddItemSuccess(`${created} item${created > 1 ? "s" : ""} added. ${warnings.length} item${warnings.length > 1 ? "s" : ""} need${warnings.length === 1 ? "s" : ""} confirmation.`);
+      }
+      if (errors.length > 0) {
+        setAddItemError(`${errors.length} failed: ${errors.join("; ")}`);
+      }
+      return;
+    }
+
+    if (errors.length > 0 && created === 0) {
+      setAddItemError(`All items failed: ${errors.join("; ")}`);
+    } else if (errors.length > 0 && created > 0) {
+      setAddItemSuccess(`${created} item${created > 1 ? "s" : ""} added.`);
+      setAddItemError(`${errors.length} failed: ${errors.join("; ")}`);
+    } else if (created > 0) {
+      setAddItemSuccess(`${created} item${created > 1 ? "s" : ""} added successfully.`);
+      setAddItemRows([{ itemNumber: "", price: "", description: "" }]);
+      setAddItemWarnings([]);
+      setAddItemPendingConfirm(false);
+      setTimeout(() => router.refresh(), 500);
+    }
+  }
+
   async function handleApproval(action: "approve" | "reject" | "revert") {
     setApproving(true);
     setApprovalError(null);
@@ -180,14 +303,38 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
             )}
           </div>
           <div className="flex items-center gap-2">
+            <div className="relative" ref={updateDropdownRef}>
+              <button
+                onClick={() => setUpdateDropdownOpen(!updateDropdownOpen)}
+                className="rounded-lg bg-brennan-blue px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brennan-dark flex items-center gap-1"
+              >
+                Update Contract
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+              </button>
+              {updateDropdownOpen && (
+                <div className="absolute right-0 mt-1 w-48 rounded-lg border border-brennan-border bg-white shadow-lg z-20">
+                  <Link
+                    href={`/contracts/${contract.id}/update`}
+                    className="block px-4 py-2.5 text-xs text-gray-700 hover:bg-brennan-light rounded-t-lg"
+                    onClick={() => setUpdateDropdownOpen(false)}
+                  >
+                    <span className="font-medium">Upload File</span>
+                    <br />
+                    <span className="text-gray-400">Compare a spreadsheet against current records</span>
+                  </Link>
+                  <button
+                    onClick={() => { setShowAddItems(true); setUpdateDropdownOpen(false); }}
+                    className="block w-full text-left px-4 py-2.5 text-xs text-gray-700 hover:bg-brennan-light rounded-b-lg border-t border-gray-100"
+                  >
+                    <span className="font-medium">Add Items Manually</span>
+                    <br />
+                    <span className="text-gray-400">Add a few parts or change prices directly</span>
+                  </button>
+                </div>
+              )}
+            </div>
             <Link
-              href={`/contracts/${contract.id}/update`}
-              className="rounded-lg bg-brennan-blue px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brennan-dark"
-            >
-              Update Contract
-            </Link>
-            <Link
-              href={`/records?contract=${contract.contractNumber}`}
+              href={`/records?contract=${contract.contractNumber}&distributor=${contract.distributor.code}&endUser=${encodeURIComponent(contract.endUser.name)}`}
               className="rounded-lg border border-brennan-border bg-white px-3 py-1.5 text-xs font-medium text-brennan-blue transition-colors hover:bg-brennan-light"
             >
               View all records →
@@ -403,6 +550,147 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
         ))}
       </div>
 
+      {/* Manual Add Items Panel */}
+      {showAddItems && (
+        <div className="rounded-lg border-2 border-brennan-blue bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-brennan-border bg-brennan-light px-4 py-3">
+            <h3 className="text-sm font-semibold text-brennan-blue">Add Items to Contract</h3>
+            <button
+              onClick={() => { setShowAddItems(false); setAddItemError(null); setAddItemSuccess(null); }}
+              className="text-xs text-gray-500 hover:text-gray-700"
+            >
+              Cancel
+            </button>
+          </div>
+          <div className="p-4 space-y-3">
+            {isMultiPlan && (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Target Plan <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={selectedPlanId ?? ""}
+                  onChange={(e) => setSelectedPlanId(e.target.value ? Number(e.target.value) : null)}
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-brennan-blue focus:outline-none"
+                >
+                  <option value="">Select plan...</option>
+                  {plans.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.planCode}{p.planName ? ` — ${p.planName}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-gray-500 uppercase tracking-wider">
+                  <th className="px-2 py-1">Part Number *</th>
+                  <th className="px-2 py-1">Price *</th>
+                  <th className="px-2 py-1">Description</th>
+                  <th className="px-2 py-1 w-8"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {addItemRows.map((row, i) => (
+                  <tr key={i}>
+                    <td className="px-2 py-1">
+                      <input
+                        type="text"
+                        value={row.itemNumber}
+                        onChange={(e) => {
+                          const updated = [...addItemRows];
+                          updated[i].itemNumber = e.target.value;
+                          setAddItemRows(updated);
+                        }}
+                        placeholder="e.g. 7000-12"
+                        className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-brennan-blue focus:outline-none"
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        type="text"
+                        value={row.price}
+                        onChange={(e) => {
+                          const updated = [...addItemRows];
+                          updated[i].price = e.target.value;
+                          setAddItemRows(updated);
+                        }}
+                        placeholder="0.00"
+                        className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-brennan-blue focus:outline-none"
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        type="text"
+                        value={row.description}
+                        onChange={(e) => {
+                          const updated = [...addItemRows];
+                          updated[i].description = e.target.value;
+                          setAddItemRows(updated);
+                        }}
+                        placeholder="Optional"
+                        className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-brennan-blue focus:outline-none"
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      {addItemRows.length > 1 && (
+                        <button
+                          onClick={() => setAddItemRows(addItemRows.filter((_, j) => j !== i))}
+                          className="text-red-400 hover:text-red-600"
+                          title="Remove row"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => setAddItemRows([...addItemRows, { itemNumber: "", price: "", description: "" }])}
+                className="text-xs text-brennan-blue hover:underline"
+              >
+                + Add another row
+              </button>
+              <div className="space-y-2">
+                {addItemWarnings.length > 0 && (
+                  <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2">
+                    <p className="text-xs font-medium text-amber-700 mb-1">Warnings — review before proceeding:</p>
+                    <ul className="text-xs text-amber-600 space-y-0.5">
+                      {addItemWarnings.map((w, i) => <li key={i}>• {w}</li>)}
+                    </ul>
+                  </div>
+                )}
+                <div className="flex items-center justify-end gap-2">
+                  {addItemError && <span className="text-xs text-red-500">{addItemError}</span>}
+                  {addItemSuccess && <span className="text-xs text-emerald-600">{addItemSuccess}</span>}
+                  {addItemPendingConfirm ? (
+                    <button
+                      onClick={() => handleAddItems(true)}
+                      disabled={addItemSaving}
+                      className="rounded-lg bg-amber-500 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
+                    >
+                      {addItemSaving ? "Saving..." : "Save Anyway (Accept Warnings)"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleAddItems()}
+                      disabled={addItemSaving}
+                      className="rounded-lg bg-brennan-blue px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brennan-dark disabled:opacity-50"
+                    >
+                      {addItemSaving ? "Saving..." : "Save Items"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Records table — shows plan column only for multi-plan contracts */}
       {(() => {
         const isMultiPlan = plans.length > 1;
@@ -462,13 +750,29 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
                 )}
               </tbody>
             </table>
-            <div className="border-t border-gray-100 px-4 py-2">
+            <div className="border-t border-gray-100 px-4 py-2 flex items-center justify-between">
               <Link
-                href={`/records?contract=${contract.contractNumber}`}
+                href={`/records?contract=${contract.contractNumber}&distributor=${contract.distributor.code}&endUser=${encodeURIComponent(contract.endUser.name)}`}
                 className="text-xs text-brennan-blue hover:underline"
               >
                 View in Records workspace →
               </Link>
+              <div className="flex items-center gap-2">
+                {contract.distributor.code === "FAS" && (
+                  <a
+                    href={`/api/export/fastenal-spa/${contract.id}`}
+                    className="rounded border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+                  >
+                    Export Fastenal SPA
+                  </a>
+                )}
+                <a
+                  href={`/api/export/records-csv?contract=${contract.contractNumber}&distributor=${contract.distributor.code}${contract.endUser.code ? `&endUserCode=${encodeURIComponent(contract.endUser.code)}` : `&endUser=${encodeURIComponent(contract.endUser.name)}`}&columns=item,price`}
+                  className="rounded border border-brennan-border bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-brennan-light transition-colors"
+                >
+                  Export CSV
+                </a>
+              </div>
             </div>
           </div>
         );

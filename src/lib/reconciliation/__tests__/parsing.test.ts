@@ -4,6 +4,7 @@ import { parseClaimFile } from '../parsing.service';
 import type { ColumnMapping } from '../types';
 
 // Fastenal column mapping for tests
+// Live FAS mapping uses 'Open Net Price' — test both current and legacy headers
 const fastenalMapping: ColumnMapping = {
   distributorCode: 'FAS',
   name: 'Fastenal Claim File',
@@ -11,7 +12,7 @@ const fastenalMapping: ColumnMapping = {
     contractNumber: 'Contract ID',
     itemNumber: 'Vendor Item',
     transactionDate: 'Date',
-    deviatedPrice: 'Deviated Price',
+    deviatedPrice: 'Open Net Price',
     quantity: 'QTY',
     claimedAmount: 'Extended Discount Owed',
     standardPrice: 'Current Vendor Price',
@@ -23,6 +24,12 @@ const fastenalMapping: ColumnMapping = {
     vendorName: 'Vendor',
   },
   dateFormat: 'M/d/yyyy',
+};
+
+// Legacy mapping with 'Deviated Price' — for backward compatibility tests
+const fastenalMappingLegacy: ColumnMapping = {
+  ...fastenalMapping,
+  mappings: { ...fastenalMapping.mappings, deviatedPrice: 'Deviated Price' },
 };
 
 const periodStart = new Date(2026, 1, 1); // Feb 1, 2026
@@ -52,7 +59,7 @@ describe('parseClaimFile', () => {
         'Vendor Item': '6801-12-12-NWO-FG',
         'Description': '3/4Mix3/4MORB90Elbow',
         'Current Vendor Price': '5.5200',
-        'Deviated Price': '2.7800',
+        'Open Net Price': '2.7800',
         'QTY': '150',
         'Extended Discount Owed': '411.00',
       },
@@ -87,7 +94,7 @@ describe('parseClaimFile', () => {
         'Date': '2/27/2026',
         'Contract ID': '', // empty
         'Vendor Item': '', // empty
-        'Deviated Price': '2.78',
+        'Open Net Price': '2.78',
         'QTY': '150',
       },
     ]);
@@ -106,7 +113,7 @@ describe('parseClaimFile', () => {
         'Contract ID': '100884',
         'Vendor Item': '6801-12-12-NWO-FG',
         'Date': 'not-a-date',
-        'Deviated Price': '2.78',
+        'Open Net Price': '2.78',
         'QTY': '150',
       },
     ]);
@@ -123,7 +130,7 @@ describe('parseClaimFile', () => {
         'Contract ID': '100884',
         'Vendor Item': '6801-12-12-NWO-FG',
         'Date': '1/15/2026', // January — outside Feb period
-        'Deviated Price': '2.78',
+        'Open Net Price': '2.78',
         'QTY': '150',
       },
     ]);
@@ -141,7 +148,7 @@ describe('parseClaimFile', () => {
         'Contract ID': '100884',
         'Vendor Item': '6801-12-12-NWO-FG',
         'Date': '2/15/2026',
-        'Deviated Price': 'abc',
+        'Open Net Price': 'abc',
         'QTY': '-5',
       },
     ]);
@@ -160,7 +167,7 @@ describe('parseClaimFile', () => {
         'Vendor Item': '6801-12-12-NWO-FG',
         'Date': '2/15/2026',
         'Current Vendor Price': '5.5200',
-        'Deviated Price': '2.7800',
+        'Open Net Price': '2.7800',
         'QTY': '150',
         'Extended Discount Owed': '999.99', // Wrong — should be 411.00
       },
@@ -180,7 +187,7 @@ describe('parseClaimFile', () => {
         'Vendor Item': '6801-12-12-NWO-FG',
         'Date': '2/15/2026',
         'Current Vendor Price': '5.5200',
-        'Deviated Price': '2.7800',
+        'Open Net Price': '2.7800',
         'QTY': '150',
         'Extended Discount Owed': '411.00',
       },
@@ -198,21 +205,21 @@ describe('parseClaimFile', () => {
         'Contract ID': '100884',
         'Vendor Item': '6801-12-12-NWO-FG',
         'Date': '2/15/2026',
-        'Deviated Price': '2.78',
+        'Open Net Price': '2.78',
         'QTY': '150',
       },
       {
         'Contract ID': '', // missing
         'Vendor Item': '6801-16-16-NWO-FG',
         'Date': '2/20/2026',
-        'Deviated Price': '3.97',
+        'Open Net Price': '3.97',
         'QTY': '50',
       },
       {
         'Contract ID': '104291',
         'Vendor Item': '6801-12-12-NWO-FG',
         'Date': '2/26/2026',
-        'Deviated Price': '4.00',
+        'Open Net Price': '4.00',
         'QTY': '25',
       },
     ]);
@@ -257,14 +264,14 @@ describe('parseClaimFile', () => {
         'Contract ID': '100884',
         'Vendor Item': '6801-12-12-NWO-FG',
         'Date': '2/15/2026',
-        'Deviated Price': '2.78',
+        'Open Net Price': '2.78',
         'QTY': '150',
       },
       {
         'Contract ID': '100884',
         'Vendor Item': '6801-12-12-NWO-FG',
         'Date': '2/15/2026',
-        'Deviated Price': '2.78',
+        'Open Net Price': '2.78',
         'QTY': '150',
       },
     ]);
@@ -280,7 +287,7 @@ describe('parseClaimFile', () => {
         'Contract ID': '100884',
         'Vendor Item': '6801-12-12-NWO-FG',
         'Date': '2/15/2026',
-        'Deviated Price': '$2.78',
+        'Open Net Price': '$2.78',
         'QTY': '1,500',
         'Extended Discount Owed': '$4,110.00',
         'Current Vendor Price': '$5.52',
@@ -303,7 +310,7 @@ describe('parseClaimFile', () => {
         'Contract ID': '100884',
         'Vendor Item': '6801-12-12-NWO-FG',
         'Date': '2/15/2026',
-        'Deviated Price': '2.78',
+        'Open Net Price': '2.78',
         'QTY': '150',
       },
     ]);
@@ -319,7 +326,7 @@ describe('parseClaimFile', () => {
         'Contract ID': '100884',
         'Vendor Item': '6801-12-12-NWO-FG',
         'Date': '2/15/2026',
-        'Deviated Price': '2.78',
+        'Open Net Price': '2.78',
         'QTY': '150',
         'Extra Column': 'bonus data',
       },
@@ -333,9 +340,9 @@ describe('parseClaimFile', () => {
 
   it('assigns correct row numbers (1-indexed, skipping header)', () => {
     const buffer = makeExcelBuffer([
-      { 'Contract ID': '100884', 'Vendor Item': 'A', 'Date': '2/1/2026', 'Deviated Price': '1', 'QTY': '1' },
-      { 'Contract ID': '100885', 'Vendor Item': 'B', 'Date': '2/2/2026', 'Deviated Price': '2', 'QTY': '2' },
-      { 'Contract ID': '100886', 'Vendor Item': 'C', 'Date': '2/3/2026', 'Deviated Price': '3', 'QTY': '3' },
+      { 'Contract ID': '100884', 'Vendor Item': 'A', 'Date': '2/1/2026', 'Open Net Price': '1', 'QTY': '1' },
+      { 'Contract ID': '100885', 'Vendor Item': 'B', 'Date': '2/2/2026', 'Open Net Price': '2', 'QTY': '2' },
+      { 'Contract ID': '100886', 'Vendor Item': 'C', 'Date': '2/3/2026', 'Open Net Price': '3', 'QTY': '3' },
     ]);
 
     const result = parseClaimFile(buffer, 'test.xlsx', fastenalMapping, periodStart, periodEnd);
@@ -343,5 +350,30 @@ describe('parseClaimFile', () => {
     expect(result.rows[0].rowNumber).toBe(2); // Row 2 in file (row 1 = header)
     expect(result.rows[1].rowNumber).toBe(3);
     expect(result.rows[2].rowNumber).toBe(4);
+  });
+
+  it('parses with legacy "Deviated Price" header using legacy mapping', () => {
+    const buffer = makeExcelBuffer([
+      {
+        'Vendor': 'BRENNAN',
+        'Order no': 'PO-001',
+        'Date': '2/15/2026',
+        'Customer': 'LOC-123',
+        'Name': 'Test Customer',
+        'Contract ID': '100001',
+        'Item': 'FAS-001',
+        'Vendor Item': '7000-12',
+        'Description': 'Test Part',
+        'Current Vendor Price': '20.00',
+        'Deviated Price': '13.25',
+        'QTY': '10',
+        'Extended Discount Owed': '67.50',
+      },
+    ]);
+
+    const result = parseClaimFile(buffer, 'legacy-fas.xlsx', fastenalMappingLegacy, periodStart, periodEnd);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].deviatedPrice).toBeCloseTo(13.25);
+    expect(result.rows[0].endUserCode).toBe('LOC-123');
   });
 });

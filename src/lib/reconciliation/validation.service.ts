@@ -117,7 +117,22 @@ export async function validateRun(runId: number): Promise<ValidationResult> {
     }
 
     // --- CLM-004: Contract Not Found ---
-    const contract = refData.contractsByNumber.get(contractNumber);
+    // When multiple contracts share a number (different end users/locations),
+    // use the claim row's endUserCode to narrow. For Fastenal, `endUserCode`
+    // is the Customer field which maps to the contract's `customerNumber`.
+    const claimEndUserCode = row.endUserCode?.trim() || '';
+    let contract = refData.contractsByNumber.get(contractNumber);
+    const allForNumber = refData.contractsByNumberAll.get(contractNumber);
+    if (allForNumber && allForNumber.length > 1 && claimEndUserCode) {
+      // Try to narrow by customerNumber match
+      const narrowed = allForNumber.find(
+        (c) => c.customerNumber && c.customerNumber.toUpperCase() === claimEndUserCode.toUpperCase()
+      );
+      if (narrowed) {
+        contract = narrowed;
+      }
+      // If no customerNumber match, fall through to the default (last-wins) contract
+    }
     if (!contract) {
       rowIssues.push({
         code: EXCEPTION_CODES.CLM_004,
@@ -369,6 +384,7 @@ export async function validateRun(runId: number): Promise<ValidationResult> {
 interface ReferenceContract {
   id: number;
   contractNumber: string;
+  customerNumber: string | null; // Distributor branch/location — matches claim `endUserCode` for Fastenal
   startDate: Date | null;
   endDate: Date | null;
   status: string;
@@ -387,6 +403,7 @@ interface ReferenceRecord {
 
 interface ReferenceData {
   contractsByNumber: Map<string, ReferenceContract>;
+  contractsByNumberAll: Map<string, ReferenceContract[]>; // all contracts with same number
   itemsByNumber: Map<string, {
     id: number;
     itemNumber: string;
@@ -484,7 +501,7 @@ export function findEffectiveDateMatch(
 
 async function crossReferencePosData(
   posBatchId: number,
-  claimRows: { id: number; rowNumber: number; itemNumber: string | null; quantity: unknown; deviatedPrice: unknown; status: string }[],
+  claimRows: { id: number; rowNumber: number; itemNumber: string | null; endUserCode: string | null; quantity: unknown; deviatedPrice: unknown; status: string }[],
   run: { claimPeriodStart: Date; claimPeriodEnd: Date; distributor: { code: string } }
 ): Promise<IssueSummary[]> {
   const posRows = await prisma.posRow.findMany({
@@ -495,19 +512,27 @@ async function crossReferencePosData(
 
   const issues: IssueSummary[] = [];
 
-  // Build POS lookup by item number (aggregate quantities across rows)
+  // Build POS lookup by item number + endUserCode when available.
+  // This prevents blending unrelated transactions for the same item across
+  // different locations (important for Fastenal with many branches).
   const posByItem = new Map<string, { totalQty: number; avgPrice: number; rowCount: number }>();
   for (const pos of posRows) {
     if (!pos.itemNumber) continue;
-    const key = pos.itemNumber.trim().toUpperCase();
-    const existing = posByItem.get(key) || { totalQty: 0, avgPrice: 0, rowCount: 0 };
-    const qty = pos.quantity ? Number(pos.quantity) : 0;
-    const price = pos.sellPrice ? Number(pos.sellPrice) : 0;
-    existing.totalQty += qty;
-    // Running average
-    existing.avgPrice = (existing.avgPrice * existing.rowCount + price) / (existing.rowCount + 1);
-    existing.rowCount++;
-    posByItem.set(key, existing);
+    const itemKey = pos.itemNumber.trim().toUpperCase();
+    // Use endUserCode-scoped key when available, plus a fallback item-only key
+    const euCode = pos.endUserCode?.trim().toUpperCase() || '';
+    const scopedKey = euCode ? `${itemKey}|${euCode}` : itemKey;
+
+    // Always aggregate into the item-only key (backward compat)
+    for (const key of [itemKey, ...(scopedKey !== itemKey ? [scopedKey] : [])]) {
+      const existing = posByItem.get(key) || { totalQty: 0, avgPrice: 0, rowCount: 0 };
+      const qty = pos.quantity ? Number(pos.quantity) : 0;
+      const price = pos.sellPrice ? Number(pos.sellPrice) : 0;
+      existing.totalQty += qty;
+      existing.avgPrice = (existing.avgPrice * existing.rowCount + price) / (existing.rowCount + 1);
+      existing.rowCount++;
+      posByItem.set(key, existing);
+    }
   }
 
   // Check each claim row against POS
@@ -515,7 +540,10 @@ async function crossReferencePosData(
     if (claim.status === 'error' || !claim.itemNumber) continue;
 
     const itemKey = claim.itemNumber.trim().toUpperCase();
-    const posData = posByItem.get(itemKey);
+    // Prefer endUserCode-scoped match when available, fall back to item-only
+    const claimEU = claim.endUserCode?.trim().toUpperCase() || '';
+    const scopedKey = claimEU ? `${itemKey}|${claimEU}` : itemKey;
+    const posData = posByItem.get(scopedKey) || posByItem.get(itemKey);
 
     if (!posData) {
       // CLM-010: No matching POS transaction
@@ -595,6 +623,7 @@ async function loadReferenceData(
     select: {
       id: true,
       contractNumber: true,
+      customerNumber: true,
       startDate: true,
       endDate: true,
       status: true,
@@ -602,21 +631,29 @@ async function loadReferenceData(
     },
   });
 
+  // Build lookup. When multiple contracts share a number (different end users),
+  // store them all so the validator can narrow using claim-row endUserCode.
   const contractsByNumber = new Map<string, ReferenceContract>();
+  const contractsByNumberAll = new Map<string, ReferenceContract[]>();
   for (const c of contracts) {
     const planCodes = new Map<number, string>();
     for (const p of c.rebatePlans) {
       planCodes.set(p.id, p.planCode);
     }
-    contractsByNumber.set(c.contractNumber, {
+    const ref: ReferenceContract = {
       id: c.id,
       contractNumber: c.contractNumber,
+      customerNumber: c.customerNumber,
       startDate: c.startDate,
       endDate: c.endDate,
       status: c.status,
       planIds: c.rebatePlans.map(p => p.id),
       planCodes,
-    });
+    };
+    contractsByNumber.set(c.contractNumber, ref); // last-wins for backward compat
+    const list = contractsByNumberAll.get(c.contractNumber) || [];
+    list.push(ref);
+    contractsByNumberAll.set(c.contractNumber, list);
   }
 
   // Load only the items referenced in this run for the same reason.
@@ -671,5 +708,5 @@ async function loadReferenceData(
     bucket.sort((a, b) => b.startDate.getTime() - a.startDate.getTime());
   }
 
-  return { contractsByNumber, itemsByNumber, recordsByContractItem };
+  return { contractsByNumber, contractsByNumberAll, itemsByNumber, recordsByContractItem };
 }
