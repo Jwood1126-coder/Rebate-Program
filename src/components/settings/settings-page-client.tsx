@@ -81,7 +81,7 @@ export function SettingsPageClient({ role, counts, distributors = [], existingMa
       {mainTab === "entities" && <EntitiesTab counts={counts} />}
       {mainTab === "mappings" && <MappingsTab distributors={distributors} existingMappings={existingMappings} />}
       {mainTab === "users" && isAdmin && <UsersTab />}
-      {mainTab === "system" && <SystemTab counts={counts} />}
+      {mainTab === "system" && <SystemTab counts={counts} isAdmin={isAdmin} />}
     </div>
   );
 }
@@ -442,7 +442,7 @@ function MappingsTab({ distributors, existingMappings }: { distributors: Distrib
 // ============================================================================
 // System Tab
 // ============================================================================
-function SystemTab({ counts }: { counts: SettingsPageClientProps["counts"] }) {
+function SystemTab({ counts, isAdmin }: { counts: SettingsPageClientProps["counts"]; isAdmin: boolean }) {
   const [exportingFull, setExportingFull] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -496,6 +496,23 @@ function SystemTab({ counts }: { counts: SettingsPageClientProps["counts"] }) {
           </div>
         </div>
       </div>
+
+      {isAdmin && (
+        <div className="rounded-lg border border-brennan-border bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-brennan-text">Login Activity</h3>
+              <p className="mt-0.5 text-xs text-gray-500">Track who has logged in and when</p>
+            </div>
+            <a
+              href="/admin/login-activity"
+              className="rounded-lg bg-brennan-blue px-4 py-2 text-sm font-medium text-white hover:bg-brennan-dark transition-colors"
+            >
+              View Login Activity
+            </a>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-lg border border-brennan-border bg-white p-5 shadow-sm">
         <h3 className="text-sm font-bold text-brennan-text">Database Summary</h3>
