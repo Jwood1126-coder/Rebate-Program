@@ -170,6 +170,7 @@ model RebateRecord {
   rebatePlanId     Int            @map("rebate_plan_id")
   itemId           Int            @map("item_id")
   rebatePrice      Decimal        @map("rebate_price") @db.Decimal(12, 4)
+  standardPrice    Decimal?       @map("standard_price") @db.Decimal(12, 4) // List price before rebate discount
   startDate        DateTime       @map("start_date") @db.Date
   endDate          DateTime?      @map("end_date") @db.Date
   status           String         @default("active") @db.VarChar(20)
@@ -585,6 +586,7 @@ model ContractUpdateDiff {
   // What changed (for 'changed' diffs)
   oldPrice              Decimal?  @map("old_price") @db.Decimal(12, 4)
   newPrice              Decimal?  @map("new_price") @db.Decimal(12, 4)
+  newStandardPrice      Decimal?  @map("new_standard_price") @db.Decimal(12, 4)
   // Match confidence
   matchStatus           String    @default("auto") @map("match_status") @db.VarChar(20) // auto, ambiguous, manual
   ambiguityReason       String?   @map("ambiguity_reason") @db.VarChar(255)

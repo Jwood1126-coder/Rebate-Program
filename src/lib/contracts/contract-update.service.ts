@@ -47,6 +47,7 @@ export interface StagedDiff {
   matchedRecordId: number | null;
   oldPrice: number | null;
   newPrice: number | null;
+  newStandardPrice: number | null;
   matchStatus: string;
   ambiguityReason: string | null;
 }
@@ -205,6 +206,7 @@ export async function stageContractUpdate(
         matchedRecordId: null,
         oldPrice: null,
         newPrice: fileItem.price,
+          newStandardPrice: fileItem.standardPrice ?? null,
         matchStatus,
         ambiguityReason: ambiguity,
       });
@@ -227,6 +229,7 @@ export async function stageContractUpdate(
         matchedRecordId: matchResult.record.id,
         oldPrice: matchResult.record.rebatePrice,
         newPrice: fileItem.price,
+          newStandardPrice: fileItem.standardPrice ?? null,
         matchStatus: matchResult.matchStatus,
         ambiguityReason: matchResult.ambiguityReason,
       });
@@ -249,6 +252,7 @@ export async function stageContractUpdate(
           matchedRecordId: matchResult.record.id,
           oldPrice: matchResult.record.rebatePrice,
           newPrice: fileItem.price,
+          newStandardPrice: fileItem.standardPrice ?? null,
           matchStatus: matchResult.matchStatus,
           ambiguityReason: matchResult.ambiguityReason,
         });
@@ -275,6 +279,7 @@ export async function stageContractUpdate(
           matchedRecordId: rec.id,
           oldPrice: rec.rebatePrice,
           newPrice: null,
+          newStandardPrice: null,
           matchStatus: MATCH_STATUSES.AUTO,
           ambiguityReason: null,
         });
@@ -324,6 +329,7 @@ export async function stageContractUpdate(
           matchedRecordId: d.matchedRecordId,
           oldPrice: d.oldPrice,
           newPrice: d.newPrice,
+          newStandardPrice: d.newStandardPrice,
           matchStatus: d.matchStatus,
           ambiguityReason: d.ambiguityReason,
         })),

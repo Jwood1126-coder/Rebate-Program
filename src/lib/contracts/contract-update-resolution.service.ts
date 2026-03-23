@@ -399,7 +399,7 @@ export async function commitContractUpdate(
 
 async function commitAddedDiff(
   tx: TxClient,
-  diff: { id: number; itemId: number | null; itemNumber: string },
+  diff: { id: number; itemId: number | null; itemNumber: string; newStandardPrice: unknown },
   price: number,
   planId: number,
   effectiveDate: Date,
@@ -425,6 +425,7 @@ async function commitAddedDiff(
       rebatePlanId: planId,
       itemId,
       rebatePrice: price,
+      standardPrice: diff.newStandardPrice ? Number(diff.newStandardPrice) : null,
       startDate: effectiveDate,
       endDate,
       status,
@@ -434,7 +435,7 @@ async function commitAddedDiff(
   });
 
   await auditInTx(tx, "rebate_records", record.id, "INSERT",
-    computeInsertSnapshot({ rebatePlanId: planId, itemId, rebatePrice: price, startDate: effectiveDate, endDate, status }),
+    computeInsertSnapshot({ rebatePlanId: planId, itemId, rebatePrice: price, standardPrice: diff.newStandardPrice ? Number(diff.newStandardPrice) : null, startDate: effectiveDate, endDate, status }),
     userId);
 
   // Link committed record back to diff
@@ -448,7 +449,7 @@ async function commitAddedDiff(
 
 async function commitChangedDiff(
   tx: TxClient,
-  diff: { id: number; matchedRecordId: number | null; rebatePlanId: number | null; itemId: number | null; itemNumber: string },
+  diff: { id: number; matchedRecordId: number | null; rebatePlanId: number | null; itemId: number | null; itemNumber: string; newStandardPrice: unknown },
   newPrice: number,
   targetPlanId: number | null,
   effectiveDate: Date,
@@ -490,6 +491,7 @@ async function commitChangedDiff(
       rebatePlanId: newPlanId,
       itemId: oldRecord.itemId,
       rebatePrice: newPrice,
+      standardPrice: diff.newStandardPrice ? Number(diff.newStandardPrice) : oldRecord.standardPrice,
       startDate: effectiveDate,
       endDate: endDate ?? oldRecord.endDate,
       status,

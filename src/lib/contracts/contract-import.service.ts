@@ -524,6 +524,7 @@ export interface ContractColumnMapping {
 export interface SimpleLineItem {
   itemNumber: string;
   price: number;
+  standardPrice?: number;
   rowNum: number;
   description?: string;
 }
@@ -630,6 +631,7 @@ function parseSPALineItems(ws: XLSX.WorkSheet): SimpleParseResult {
   for (let r = 22; r <= range.e.r; r++) { // Row 23+ (0-indexed = 22+)
     const supplierCell = ws[XLSX.utils.encode_cell({ r, c: 1 })]; // Column B
     const priceCell = ws[XLSX.utils.encode_cell({ r, c: 6 })];    // Column G
+    const stdPriceCell = ws[XLSX.utils.encode_cell({ r, c: 5 })]; // Column F — Standard Price
     const descCell = ws[XLSX.utils.encode_cell({ r, c: 3 })];     // Column D
 
     const itemNumber = supplierCell ? String(supplierCell.v).trim() : '';
@@ -644,6 +646,11 @@ function parseSPALineItems(ws: XLSX.WorkSheet): SimpleParseResult {
       continue;
     }
 
+    // Parse Standard Price (optional — column F)
+    const stdPriceVal = stdPriceCell ? stdPriceCell.v : null;
+    const stdPriceStr = stdPriceVal != null ? String(stdPriceVal).replace(/[$,\s]/g, '') : '';
+    const standardPrice = parseFloat(stdPriceStr);
+
     if (seenParts.has(itemNumber.toUpperCase())) {
       warnings.push(`Row ${r + 1}: Duplicate item "${itemNumber}" — only the first occurrence will be used`);
       continue;
@@ -652,7 +659,13 @@ function parseSPALineItems(ws: XLSX.WorkSheet): SimpleParseResult {
 
     const description = descCell ? String(descCell.v).trim() : '';
 
-    items.push({ itemNumber, price, rowNum: r + 1, description: description || undefined });
+    items.push({
+      itemNumber,
+      price,
+      standardPrice: !isNaN(standardPrice) && standardPrice > 0 ? standardPrice : undefined,
+      rowNum: r + 1,
+      description: description || undefined,
+    });
   }
 
   if (items.length === 0) {
@@ -1007,6 +1020,7 @@ export async function commitSimpleImport(
           rebatePlanId: plan.id,
           itemId: item.id,
           rebatePrice: lineItem.price,
+          standardPrice: lineItem.standardPrice ?? null,
           startDate,
           endDate,
           status,

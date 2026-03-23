@@ -52,6 +52,7 @@ export default async function ContractDetailPage({
       itemNumber: r.item.itemNumber,
       itemDescription: r.item.description,
       rebatePrice: r.rebatePrice.toString(),
+      standardPrice: r.standardPrice ? r.standardPrice.toString() : null,
       startDate: formatDate(r.startDate),
       endDate: r.endDate ? formatDate(r.endDate) : "",
       rawStartDate: r.startDate.toISOString().split("T")[0],

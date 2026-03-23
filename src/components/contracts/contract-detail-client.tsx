@@ -25,6 +25,7 @@ interface RecordRow {
   itemNumber: string;
   itemDescription: string | null;
   rebatePrice: string;
+  standardPrice: string | null;
   startDate: string;
   endDate: string;
   rawStartDate: string;
@@ -420,10 +421,38 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
           <div>
             <p className="text-xs font-medium text-gray-400 uppercase">End User</p>
             {editing ? (
-              <select value={editEndUserId} onChange={e => setEditEndUserId(e.target.value)} className="mt-0.5 w-full rounded border border-gray-300 px-2 py-1 text-sm">
-                <option value="">— Select —</option>
-                {endUsers.map(eu => <option key={eu.id} value={eu.id}>{eu.name}{eu.code ? ` (${eu.code})` : ""}</option>)}
-              </select>
+              <div>
+                <select value={editEndUserId} onChange={e => setEditEndUserId(e.target.value)} className="mt-0.5 w-full rounded border border-gray-300 px-2 py-1 text-sm">
+                  <option value="">— Select —</option>
+                  {endUsers.map(eu => <option key={eu.id} value={eu.id}>{eu.name}{eu.code ? ` (${eu.code})` : ""}</option>)}
+                  <option value="__new__">+ Create new end user</option>
+                </select>
+                {editEndUserId === "__new__" && (
+                  <div className="mt-1 space-y-1">
+                    <input id="newEuName" placeholder="Name" className="w-full rounded border border-gray-300 px-2 py-1 text-xs" />
+                    <input id="newEuCode" placeholder="Code (e.g. ACME)" className="w-full rounded border border-gray-300 px-2 py-1 text-xs font-mono" />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const name = (document.getElementById("newEuName") as HTMLInputElement).value.trim();
+                        const code = (document.getElementById("newEuCode") as HTMLInputElement).value.trim();
+                        if (!name || !code) return;
+                        try {
+                          const res = await fetch("/api/end-users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, code }) });
+                          if (res.ok) {
+                            const eu = await res.json();
+                            endUsers.push({ id: eu.id, name: eu.name, code: eu.code });
+                            setEditEndUserId(String(eu.id));
+                          }
+                        } catch { /* ignore */ }
+                      }}
+                      className="rounded bg-brennan-blue px-2 py-0.5 text-[10px] font-medium text-white hover:bg-brennan-blue/90"
+                    >
+                      Create
+                    </button>
+                  </div>
+                )}
+              </div>
             ) : (
               <>
                 <p className="mt-0.5 text-sm font-medium text-brennan-text">{contract.endUser.name}</p>
@@ -750,6 +779,7 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
                   <th className="px-4 py-2">Item #</th>
                   <th className="px-3 py-2">Description</th>
                   {isMultiPlan && <th className="px-3 py-2">Plan</th>}
+                  <th className="px-3 py-2 text-right">Standard Price</th>
                   <th className="px-3 py-2 text-right">Rebate Price</th>
                   <th className="px-3 py-2">Start</th>
                   <th className="px-3 py-2">End</th>
@@ -778,6 +808,9 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
                           {plan.planCode}
                         </td>
                       )}
+                      <td className="px-3 py-1.5 text-right font-mono text-gray-400">
+                        {r.standardPrice ? `$${Number(r.standardPrice).toFixed(2)}` : "—"}
+                      </td>
                       <td className="px-3 py-1.5 text-right font-mono text-gray-700">
                         ${Number(r.rebatePrice).toFixed(2)}
                       </td>

@@ -14,6 +14,15 @@ until npx prisma db push --skip-generate --accept-data-loss 2>&1; do
 done
 echo "=== DATABASE READY ==="
 
+# Fix legacy pending_review contracts (approval workflow removed)
+node -e '
+const { PrismaClient } = require("@prisma/client");
+const p = new PrismaClient();
+p.contract.updateMany({ where: { status: "pending_review" }, data: { status: "active" } })
+  .then(r => { if (r.count > 0) console.log("Updated " + r.count + " pending_review contracts to active"); return p.$disconnect(); })
+  .catch(() => p.$disconnect());
+'
+
 # Only seed if explicitly enabled (for first deploy or reset)
 if [ "$ENABLE_BOOTSTRAP_SEED" = "true" ]; then
   echo "=== SEEDING DATABASE (ENABLE_BOOTSTRAP_SEED=true) ==="
