@@ -268,9 +268,6 @@ export function RecordDetailClient({
           <div>
             <p className="text-xs font-medium text-gray-400 uppercase">End User</p>
             <p className="mt-0.5 text-sm font-medium text-brennan-text">{record.endUser.name}</p>
-            {record.endUser.code && (
-              <p className="text-xs text-gray-400">{record.endUser.code}</p>
-            )}
           </div>
           <div>
             <p className="text-xs font-medium text-gray-400 uppercase">Contract</p>

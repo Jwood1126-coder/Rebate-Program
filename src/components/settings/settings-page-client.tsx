@@ -340,14 +340,13 @@ function EndUsersSection() {
   return (
     <EntityTable
       loading={loading}
-      columns={["Code", "Name", "Status", ""]}
+      columns={["Name", "Status", ""]}
       onNew={() => setCreating(true)}
       newLabel="New End User"
     >
       {data.map((u) => (
         <tr key={u.id} className="border-b border-brennan-border hover:bg-brennan-light/40">
-          <td className="px-3 py-2 text-sm font-bold text-brennan-text">{u.code}</td>
-          <td className="px-3 py-2 text-sm text-brennan-text">{u.name}</td>
+          <td className="px-3 py-2 text-sm font-bold text-brennan-text">{u.name}</td>
           <td className="px-3 py-2"><ActiveBadge active={u.isActive} /></td>
           <td className="px-3 py-2 text-right">
             <button onClick={() => setEditId(u.id)} className="text-xs font-medium text-brennan-blue hover:underline">Edit</button>
@@ -361,7 +360,6 @@ function EndUsersSection() {
         <CreateModal
           title="New End User"
           fields={[
-            { key: "code", label: "Code", required: true },
             { key: "name", label: "Name", required: true },
           ]}
           apiPath="end-users"
@@ -884,7 +882,6 @@ function EditModal({
             )}
             {type === "endUser" && (
               <>
-                <Field label="Code"><input className={readOnlyCls} value={String(formData.code || "")} readOnly /></Field>
                 <Field label="Name"><input className={inputCls} value={String(formData.name || "")} onChange={(e) => update("name", e.target.value)} /></Field>
                 <Checkbox label="Active" checked={Boolean(formData.isActive)} onChange={(v) => update("isActive", v)} />
               </>
@@ -1004,7 +1001,7 @@ function ContractCreateModal({ onClose, onSaved }: { onClose: () => void; onSave
   }
 
   const distOptions = distributors.map((d) => ({ value: String(d.id), label: `${d.code} - ${d.name}` }));
-  const euOptions = endUsers.map((e) => ({ value: String(e.id), label: `${e.code} - ${e.name}` }));
+  const euOptions = endUsers.map((e) => ({ value: String(e.id), label: e.name }));
 
   return (
     <ModalShell title="New Contract" onClose={onClose}>

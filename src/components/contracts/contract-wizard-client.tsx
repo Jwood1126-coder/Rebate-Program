@@ -161,7 +161,6 @@ function UploadMode({
   // Context fields (set once, apply to all items)
   const [distributorId, setDistributorId] = useState<string>("");
   const [endUserId, setEndUserId] = useState<string>("");
-  const [newEndUserCode, setNewEndUserCode] = useState("");
   const [newEndUserName, setNewEndUserName] = useState("");
   const [creatingEndUser, setCreatingEndUser] = useState(false);
   const [localEndUsers, setLocalEndUsers] = useState(initialEndUsers);
@@ -261,7 +260,6 @@ function UploadMode({
             } else {
               // Pre-fill the "create end user" fields
               setNewEndUserName(meta.endUser);
-              setNewEndUserCode(meta.endUser.toUpperCase().replace(/[^A-Z0-9]/g, "").substring(0, 10));
             }
           }
 
@@ -287,20 +285,19 @@ function UploadMode({
   }
 
   async function handleCreateEndUser() {
-    if (!newEndUserCode.trim() || !newEndUserName.trim()) return;
+    if (!newEndUserName.trim()) return;
     setCreatingEndUser(true);
     setError(null);
     try {
       const res = await fetch("/api/end-users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: newEndUserCode.trim(), name: newEndUserName.trim() }),
+        body: JSON.stringify({ name: newEndUserName.trim() }),
       });
       const data = await res.json();
       if (res.ok) {
         setLocalEndUsers(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
         setEndUserId(String(data.id));
-        setNewEndUserCode("");
         setNewEndUserName("");
       } else {
         setError(data.error || "Failed to create end user");
@@ -457,18 +454,14 @@ function UploadMode({
               <select value={endUserId} onChange={e => { setEndUserId(e.target.value); setPreview(null); }}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue">
                 <option value="">Select end user...</option>
-                {localEndUsers.map(u => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
+                {localEndUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
               <div className="mt-2 flex items-end gap-2">
                 <div className="flex-1">
-                  <input value={newEndUserCode} onChange={e => setNewEndUserCode(e.target.value.toUpperCase())} placeholder="New code"
-                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
-                </div>
-                <div className="flex-[2]">
                   <input value={newEndUserName} onChange={e => setNewEndUserName(e.target.value)} placeholder="New end user name"
                     className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
                 </div>
-                <button onClick={handleCreateEndUser} disabled={!newEndUserCode.trim() || !newEndUserName.trim() || creatingEndUser}
+                <button onClick={handleCreateEndUser} disabled={!newEndUserName.trim() || creatingEndUser}
                   className="rounded bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50">
                   {creatingEndUser ? "..." : "Create"}
                 </button>
@@ -813,7 +806,6 @@ function ManualMode({
   // Step 1
   const [distributorId, setDistributorId] = useState<string>("");
   const [endUserId, setEndUserId] = useState<string>("");
-  const [newEndUserCode, setNewEndUserCode] = useState("");
   const [newEndUserName, setNewEndUserName] = useState("");
   const [creatingEndUser, setCreatingEndUser] = useState(false);
   const [localEndUsers, setLocalEndUsers] = useState<EndUserOption[]>(initialEndUsers);
@@ -848,20 +840,19 @@ function ManualMode({
     : [];
 
   async function handleCreateEndUser() {
-    if (!newEndUserCode.trim() || !newEndUserName.trim()) return;
+    if (!newEndUserName.trim()) return;
     setCreatingEndUser(true);
     setError(null);
     try {
       const res = await fetch("/api/end-users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: newEndUserCode.trim(), name: newEndUserName.trim() }),
+        body: JSON.stringify({ name: newEndUserName.trim() }),
       });
       const data = await res.json();
       if (res.ok) {
         setLocalEndUsers(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
         setEndUserId(String(data.id));
-        setNewEndUserCode("");
         setNewEndUserName("");
       } else {
         setError(data.error || "Failed to create end user");
@@ -1041,24 +1032,19 @@ function ManualMode({
                 <select value={endUserId} onChange={e => setEndUserId(e.target.value)}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue">
                   <option value="">Select end user...</option>
-                  {localEndUsers.map(u => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
+                  {localEndUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
               </div>
             </div>
             <div className="border-t border-gray-100 pt-4">
               <p className="text-xs font-medium text-gray-500 mb-2">Or create a new end user:</p>
               <div className="flex items-end gap-3">
-                <div className="flex-1">
-                  <label className="block text-xs text-gray-500 mb-1">Code</label>
-                  <input value={newEndUserCode} onChange={e => setNewEndUserCode(e.target.value.toUpperCase())} placeholder="e.g. DEERE"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
-                </div>
                 <div className="flex-[2]">
                   <label className="block text-xs text-gray-500 mb-1">Name</label>
                   <input value={newEndUserName} onChange={e => setNewEndUserName(e.target.value)} placeholder="e.g. John Deere"
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brennan-blue focus:ring-1 focus:ring-brennan-blue" />
                 </div>
-                <button onClick={handleCreateEndUser} disabled={!newEndUserCode.trim() || !newEndUserName.trim() || creatingEndUser}
+                <button onClick={handleCreateEndUser} disabled={!newEndUserName.trim() || creatingEndUser}
                   className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50">
                   {creatingEndUser ? "Creating..." : "Create"}
                 </button>
@@ -1264,7 +1250,7 @@ function ManualMode({
                     <h3 className="text-sm font-medium text-gray-700 border-b border-gray-100 pb-1">Contract</h3>
                     <dl className="text-sm space-y-1">
                       <div className="flex justify-between"><dt className="text-gray-500">Distributor</dt><dd className="font-medium">{selectedDistributor?.code} — {selectedDistributor?.name}</dd></div>
-                      <div className="flex justify-between"><dt className="text-gray-500">End User</dt><dd className="font-medium">{selectedEndUser?.code} — {selectedEndUser?.name}</dd></div>
+                      <div className="flex justify-between"><dt className="text-gray-500">End User</dt><dd className="font-medium">{selectedEndUser?.name}</dd></div>
                       <div className="flex justify-between"><dt className="text-gray-500">Contract #</dt><dd className="font-mono text-gray-400 italic">auto-generated</dd></div>
                       {contractDescription && <div className="flex justify-between"><dt className="text-gray-500">Description</dt><dd>{contractDescription}</dd></div>}
                       <div className="flex justify-between"><dt className="text-gray-500">Dates</dt><dd>{contractStartDate || "No start"} — {contractEndDate || "Open"}</dd></div>

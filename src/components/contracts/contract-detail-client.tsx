@@ -118,13 +118,12 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
 
   // Edit mode state
   const [editing, setEditing] = useState(false);
-  const [editEndUserId, setEditEndUserId] = useState<string>(String(contract.endUser.code ? endUsers.find(eu => eu.code === contract.endUser.code)?.id ?? "" : ""));
+  const [editEndUserId, setEditEndUserId] = useState<string>(String(endUsers.find(eu => eu.name === contract.endUser.name)?.id ?? ""));
   const [editCustomerNumber, setEditCustomerNumber] = useState(contract.customerNumber || "");
   const [editDescription, setEditDescription] = useState(contract.description || "");
   const [editSaving, setEditSaving] = useState(false);
   const [localEndUsers, setLocalEndUsers] = useState<EndUserOption[]>(endUsers);
   const [newEuName, setNewEuName] = useState("");
-  const [newEuCode, setNewEuCode] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
 
   // Record visibility
@@ -427,27 +426,24 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
               <div>
                 <select value={editEndUserId} onChange={e => setEditEndUserId(e.target.value)} className="mt-0.5 w-full rounded border border-gray-300 px-2 py-1 text-sm">
                   <option value="">— Select —</option>
-                  {localEndUsers.map(eu => <option key={eu.id} value={eu.id}>{eu.name}{eu.code ? ` (${eu.code})` : ""}</option>)}
+                  {localEndUsers.map(eu => <option key={eu.id} value={eu.id}>{eu.name}</option>)}
                   <option value="__new__">+ Create new end user</option>
                 </select>
                 {editEndUserId === "__new__" && (
                   <div className="mt-1 space-y-1">
                     <input value={newEuName} onChange={e => setNewEuName(e.target.value)} placeholder="Name" className="w-full rounded border border-gray-300 px-2 py-1 text-xs" />
-                    <input value={newEuCode} onChange={e => setNewEuCode(e.target.value)} placeholder="Code (e.g. ACME)" className="w-full rounded border border-gray-300 px-2 py-1 text-xs font-mono" />
                     <button
                       type="button"
                       onClick={async () => {
                         const name = newEuName.trim();
-                        const code = newEuCode.trim();
-                        if (!name || !code) return;
+                        if (!name) return;
                         try {
-                          const res = await fetch("/api/end-users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, code }) });
+                          const res = await fetch("/api/end-users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
                           if (res.ok) {
                             const eu = await res.json();
                             setLocalEndUsers(prev => [...prev, { id: eu.id, name: eu.name, code: eu.code }]);
                             setEditEndUserId(String(eu.id));
                             setNewEuName("");
-                            setNewEuCode("");
                           }
                         } catch { /* ignore */ }
                       }}
@@ -461,7 +457,6 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
             ) : (
               <>
                 <p className="mt-0.5 text-sm font-medium text-brennan-text">{contract.endUser.name}</p>
-                {contract.endUser.code && <p className="text-xs text-gray-400">{contract.endUser.code}</p>}
               </>
             )}
           </div>
@@ -849,7 +844,7 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
                   Download Current Document
                 </a>
                 <a
-                  href={`/api/export/records-csv?contract=${contract.contractNumber}&distributor=${contract.distributor.code}${contract.endUser.code ? `&endUserCode=${encodeURIComponent(contract.endUser.code)}` : `&endUser=${encodeURIComponent(contract.endUser.name)}`}&columns=item,price`}
+                  href={`/api/export/records-csv?contract=${contract.contractNumber}&distributor=${contract.distributor.code}&endUser=${encodeURIComponent(contract.endUser.name)}&columns=item,price`}
                   className="rounded border border-brennan-border bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-brennan-light transition-colors"
                 >
                   Export CSV
