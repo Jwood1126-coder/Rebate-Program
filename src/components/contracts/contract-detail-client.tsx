@@ -761,14 +761,12 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
                 View in Records workspace →
               </Link>
               <div className="flex items-center gap-2">
-                {contract.distributor.code === "FAS" && (
-                  <a
-                    href={`/api/export/fastenal-spa/${contract.id}`}
-                    className="rounded border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
-                  >
-                    Export Fastenal SPA
-                  </a>
-                )}
+                <a
+                  href={`/api/contracts/${contract.id}/files/latest`}
+                  className="rounded border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+                >
+                  Download Current Document
+                </a>
                 <a
                   href={`/api/export/records-csv?contract=${contract.contractNumber}&distributor=${contract.distributor.code}${contract.endUser.code ? `&endUserCode=${encodeURIComponent(contract.endUser.code)}` : `&endUser=${encodeURIComponent(contract.endUser.name)}`}&columns=item,price`}
                   className="rounded border border-brennan-border bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-brennan-light transition-colors"
