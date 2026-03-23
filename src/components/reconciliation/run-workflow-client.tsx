@@ -152,6 +152,7 @@ export default function RunWorkflowClient({ run: initialRun, currentStep: initia
       if (res.ok) {
         await refreshRun();
         setActiveStep("review");
+        setReviewLoaded(true);
         await loadReviewIssues();
       } else {
         setValidationError(data.error || "Validation failed");
@@ -181,12 +182,14 @@ export default function RunWorkflowClient({ run: initialRun, currentStep: initia
     }
   }, [run.id]);
 
-  // Auto-load issues when entering review step
+  // Auto-load issues when entering review step (once)
+  const [reviewLoaded, setReviewLoaded] = React.useState(false);
   React.useEffect(() => {
-    if (activeStep === "review" && reviewIssues.length === 0 && !loadingReview) {
+    if (activeStep === "review" && !reviewLoaded && !loadingReview) {
+      setReviewLoaded(true);
       loadReviewIssues();
     }
-  }, [activeStep, reviewIssues.length, loadingReview, loadReviewIssues]);
+  }, [activeStep, reviewLoaded, loadingReview, loadReviewIssues]);
 
   // ---------------------------------------------------------------------------
   // Step: Review — resolve individual issue
