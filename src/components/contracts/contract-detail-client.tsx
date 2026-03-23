@@ -58,6 +58,12 @@ interface UpdateHistory {
   removedCount: number;
 }
 
+interface EndUserOption {
+  id: number;
+  name: string;
+  code: string | null;
+}
+
 interface Props {
   contract: ContractData;
   plans: PlanData[];
@@ -65,6 +71,7 @@ interface Props {
   statusCounts: Record<string, number>;
   lastReconciliation: ReconHistory | null;
   lastUpdate: UpdateHistory | null;
+  endUsers: EndUserOption[];
 }
 
 const statusColors: Record<string, string> = {
@@ -97,7 +104,7 @@ const contractTypeBadgeColors: Record<string, string> = {
   evergreen: "bg-teal-100 text-teal-700",
 };
 
-export function ContractDetailClient({ contract, plans, totalRecords, statusCounts, lastReconciliation, lastUpdate }: Props) {
+export function ContractDetailClient({ contract, plans, totalRecords, statusCounts, lastReconciliation, lastUpdate, endUsers }: Props) {
   const router = useRouter();
   const [reviewLoading, setReviewLoading] = useState(false);
   const [lastReviewed, setLastReviewed] = useState(contract.lastReviewedAt);
@@ -107,6 +114,17 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
   const [contractStatus, setContractStatus] = useState(contract.status);
   const [approving, setApproving] = useState(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
+
+  // Edit mode state
+  const [editing, setEditing] = useState(false);
+  const [editEndUserId, setEditEndUserId] = useState<string>(String(contract.endUser.code ? endUsers.find(eu => eu.code === contract.endUser.code)?.id ?? "" : ""));
+  const [editCustomerNumber, setEditCustomerNumber] = useState(contract.customerNumber || "");
+  const [editDescription, setEditDescription] = useState(contract.description || "");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Record visibility
+  const [showSuperseded, setShowSuperseded] = useState(false);
 
   // Update dropdown state
   const [updateDropdownOpen, setUpdateDropdownOpen] = useState(false);
@@ -255,6 +273,34 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
     }
   }
 
+  async function saveEdit() {
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const body: Record<string, unknown> = {
+        customerNumber: editCustomerNumber || null,
+        description: editDescription || null,
+      };
+      if (editEndUserId) body.endUserId = Number(editEndUserId);
+      const res = await fetch(`/api/contracts/${contract.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setEditing(false);
+        router.refresh();
+      } else {
+        const err = await res.json();
+        setEditError(err.error || "Failed to save");
+      }
+    } catch {
+      setEditError("Network error");
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   async function markAsReviewed() {
     setReviewLoading(true);
     setReviewError(null);
@@ -354,66 +400,14 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
           </div>
         </div>
 
-        {/* Approval banner — pending review */}
-        {contractStatus === "pending_review" && (
-          <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-amber-800">This contract is pending review</p>
-              <p className="text-xs text-amber-600 mt-0.5">Review the contract details and line items, then approve or reject.</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => { if (confirm("Reject this contract? You can revert this later if needed.")) handleApproval("reject"); }}
-                disabled={approving}
-                className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-              >
-                Reject
-              </button>
-              <button
-                onClick={() => handleApproval("approve")}
-                disabled={approving}
-                className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-              >
-                {approving ? "Processing..." : "Approve Contract"}
-              </button>
-            </div>
-          </div>
-        )}
-        {/* Revert banner — active (undo approval) */}
-        {contractStatus === "active" && (
-          <div className="mt-3 flex justify-end">
-            <button
-              onClick={() => { if (confirm("Revert this contract to pending review? It will need to be re-approved.")) handleApproval("revert"); }}
-              disabled={approving}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
-            >
-              {approving ? "Processing..." : "Revert to Pending Review"}
-            </button>
-          </div>
-        )}
-        {/* Revert banner — cancelled (undo rejection) */}
-        {contractStatus === "cancelled" && (
-          <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-red-800">This contract was rejected</p>
-              <p className="text-xs text-red-600 mt-0.5">You can revert it to pending review if this was a mistake.</p>
-            </div>
-            <button
-              onClick={() => handleApproval("revert")}
-              disabled={approving}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-            >
-              {approving ? "Processing..." : "Revert to Pending Review"}
-            </button>
-          </div>
-        )}
         {approvalError && (
           <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">
             {approvalError}
           </div>
         )}
 
-        <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-5">
+        <div className="mt-4 flex items-start justify-between">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-5 flex-1">
           <div>
             <p className="text-xs font-medium text-gray-400 uppercase">Distributor</p>
             <p className="mt-0.5 text-sm font-medium text-brennan-text">
@@ -425,17 +419,26 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
           </div>
           <div>
             <p className="text-xs font-medium text-gray-400 uppercase">End User</p>
-            <p className="mt-0.5 text-sm font-medium text-brennan-text">{contract.endUser.name}</p>
-            {contract.endUser.code && (
-              <p className="text-xs text-gray-400">{contract.endUser.code}</p>
+            {editing ? (
+              <select value={editEndUserId} onChange={e => setEditEndUserId(e.target.value)} className="mt-0.5 w-full rounded border border-gray-300 px-2 py-1 text-sm">
+                <option value="">— Select —</option>
+                {endUsers.map(eu => <option key={eu.id} value={eu.id}>{eu.name}{eu.code ? ` (${eu.code})` : ""}</option>)}
+              </select>
+            ) : (
+              <>
+                <p className="mt-0.5 text-sm font-medium text-brennan-text">{contract.endUser.name}</p>
+                {contract.endUser.code && <p className="text-xs text-gray-400">{contract.endUser.code}</p>}
+              </>
             )}
           </div>
-          {contract.customerNumber && (
-            <div>
-              <p className="text-xs font-medium text-gray-400 uppercase">Customer #</p>
-              <p className="mt-0.5 text-sm font-mono font-medium text-brennan-text">{contract.customerNumber}</p>
-            </div>
-          )}
+          <div>
+            <p className="text-xs font-medium text-gray-400 uppercase">Customer #</p>
+            {editing ? (
+              <input value={editCustomerNumber} onChange={e => setEditCustomerNumber(e.target.value)} placeholder="e.g. FA206" className="mt-0.5 w-full rounded border border-gray-300 px-2 py-1 text-sm font-mono" />
+            ) : (
+              <p className="mt-0.5 text-sm font-mono font-medium text-brennan-text">{contract.customerNumber || <span className="text-gray-400 italic">—</span>}</p>
+            )}
+          </div>
           <div>
             <p className="text-xs font-medium text-gray-400 uppercase">Effective Dates</p>
             <p className="mt-0.5 text-sm text-brennan-text">
@@ -471,7 +474,37 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
               {new Date(contract.updatedAt).toLocaleDateString()}
             </p>
           </div>
+          </div>
+          {/* Edit button */}
+          {!editing && (
+            <button
+              onClick={() => {
+                setEditing(true);
+                setEditEndUserId(String(endUsers.find(eu => eu.name === contract.endUser.name)?.id ?? ""));
+                setEditCustomerNumber(contract.customerNumber || "");
+                setEditDescription(contract.description || "");
+              }}
+              className="ml-3 rounded border border-brennan-border bg-white px-3 py-1.5 text-xs font-medium text-brennan-blue hover:bg-brennan-light flex-shrink-0"
+            >
+              Edit
+            </button>
+          )}
         </div>
+        {editing && (
+          <div className="mt-3 flex items-center gap-3">
+            <div className="flex-1">
+              <label className="text-xs font-medium text-gray-400 uppercase">Description</label>
+              <input value={editDescription} onChange={e => setEditDescription(e.target.value)} placeholder="Contract description" className="mt-0.5 w-full rounded border border-gray-300 px-2 py-1 text-sm" />
+            </div>
+            <button onClick={saveEdit} disabled={editSaving} className="rounded-lg bg-brennan-blue px-4 py-1.5 text-xs font-medium text-white hover:bg-brennan-blue/90 disabled:opacity-50">
+              {editSaving ? "Saving..." : "Save"}
+            </button>
+            <button onClick={() => { setEditing(false); setEditError(null); }} className="rounded-lg border border-gray-300 bg-white px-4 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">
+              Cancel
+            </button>
+            {editError && <p className="text-xs text-red-500">{editError}</p>}
+          </div>
+        )}
       </div>
 
       {/* Reconciliation & Update status bar */}
@@ -539,16 +572,26 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
       </div>
 
       {/* Summary stats bar */}
-      <div className="flex items-center gap-4 text-xs">
-        <span className="font-medium text-gray-500">
-          {totalRecords} record{totalRecords !== 1 ? "s" : ""}
-        </span>
-        {Object.entries(statusCounts).map(([status, count]) => (
-          <span key={status} className="flex items-center gap-1">
-            <span className={`inline-block h-2 w-2 rounded-full ${(statusColors[status] || "bg-gray-300").split(" ")[0]}`} />
-            <span className="text-gray-600">{count} {status}</span>
+      <div className="flex items-center justify-between text-xs">
+        <div className="flex items-center gap-4">
+          <span className="font-medium text-gray-500">
+            {totalRecords} record{totalRecords !== 1 ? "s" : ""}
           </span>
-        ))}
+          {Object.entries(statusCounts).map(([status, count]) => (
+            <span key={status} className="flex items-center gap-1">
+              <span className={`inline-block h-2 w-2 rounded-full ${(statusColors[status] || "bg-gray-300").split(" ")[0]}`} />
+              <span className="text-gray-600">{count} {status}</span>
+            </span>
+          ))}
+        </div>
+        {(statusCounts["superseded"] || 0) > 0 && (
+          <button
+            onClick={() => setShowSuperseded(!showSuperseded)}
+            className="text-gray-400 hover:text-gray-600"
+          >
+            {showSuperseded ? "Hide superseded" : `Show ${statusCounts["superseded"]} superseded`}
+          </button>
+        )}
       </div>
 
       {/* Manual Add Items Panel */}
@@ -716,7 +759,7 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {plans.flatMap((plan) =>
-                  plan.records.map((r) => (
+                  plan.records.filter(r => showSuperseded || r.status !== "superseded").map((r) => (
                     <tr key={r.id} className="hover:bg-gray-50/50">
                       <td className="px-4 py-1.5 font-mono font-medium">
                         <Link

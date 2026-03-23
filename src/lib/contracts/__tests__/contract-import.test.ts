@@ -373,7 +373,7 @@ describe('commitSimpleImport contract type handling', () => {
     expect(contractCreateCall.data.customerNumber).toBe('CUST-42');
   });
 
-  it('creates contract with pending_review status', async () => {
+  it('creates contract with active status', async () => {
     await mockXlsxForSimpleParse([
       { 'Part Number': 'PART-1', Price: '10.00' },
     ]);
@@ -382,7 +382,7 @@ describe('commitSimpleImport contract type handling', () => {
     expect(result.success).toBe(true);
 
     const contractCreateCall = mockPrisma._tx.contract.create.mock.calls[0][0];
-    expect(contractCreateCall.data.status).toBe('pending_review');
+    expect(contractCreateCall.data.status).toBe('active');
   });
 
   it('creates plans with active status (not pending_review)', async () => {

@@ -49,6 +49,7 @@ export async function PUT(
   const data: Record<string, unknown> = {};
   if (body.contractNumber !== undefined) data.contractNumber = body.contractNumber;
   if (body.customerNumber !== undefined) data.customerNumber = body.customerNumber || null;
+  if (body.endUserId !== undefined) data.endUserId = Number(body.endUserId);
   if (body.description !== undefined) data.description = body.description;
   if (body.status !== undefined) data.status = body.status;
   if (body.startDate !== undefined) data.startDate = body.startDate ? new Date(body.startDate) : null;

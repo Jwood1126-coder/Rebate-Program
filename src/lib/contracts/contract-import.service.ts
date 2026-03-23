@@ -414,7 +414,7 @@ export async function commitContractImport(
           description: allRows[0].description || null,
           startDate: contractStartDate ? new Date(contractStartDate) : null,
           endDate: contractEndDate ? new Date(contractEndDate) : null,
-          status: 'pending_review',
+          status: 'active',
         },
       });
 
@@ -962,7 +962,7 @@ export async function commitSimpleImport(
           : null,
         startDate,
         endDate,
-        status: 'pending_review',
+        status: 'active',
       },
     });
     await auditInTx(tx, 'contracts', contract.id, {

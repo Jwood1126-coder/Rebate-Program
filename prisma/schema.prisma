@@ -76,7 +76,7 @@ model Contract {
   startDate        DateTime?    @map("start_date") @db.Date
   endDate          DateTime?    @map("end_date") @db.Date
   noticePeriodDays Int?         @map("notice_period_days") // Termination notice period for evergreen contracts
-  status           String       @default("pending_review") @db.VarChar(20) // pending_review, active, expired, cancelled
+  status           String       @default("active") @db.VarChar(20) // active, pending_review, expired, cancelled
   lastReviewedAt   DateTime?    @map("last_reviewed_at") // Manual or auto-updated on contract update commit
   externalErpId    String?      @map("external_erp_id") @db.VarChar(100)
   createdAt        DateTime     @default(now()) @map("created_at")

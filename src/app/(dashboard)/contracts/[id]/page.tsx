@@ -118,6 +118,12 @@ export default async function ContractDetailPage({
     }
   }
 
+  // Load end users for edit dropdown
+  const endUsers = await prisma.endUser.findMany({
+    select: { id: true, name: true, code: true },
+    orderBy: { name: "asc" },
+  });
+
   // Find last contract update run
   const lastUpdateRun = await prisma.contractUpdateRun.findFirst({
     where: { contractId, status: "committed" },
@@ -169,6 +175,7 @@ export default async function ContractDetailPage({
       statusCounts={statusCounts}
       lastReconciliation={reconHistory}
       lastUpdate={updateHistory}
+      endUsers={endUsers}
     />
   );
 }
