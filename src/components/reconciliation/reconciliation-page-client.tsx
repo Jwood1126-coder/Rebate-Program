@@ -1071,6 +1071,21 @@ export default function ReconciliationPageClient({
                             >
                               Export
                             </a>
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`Delete Run #${run.id}? This removes the reconciliation record but does NOT undo any committed changes to master data.`)) return;
+                                const res = await fetch(`/api/reconciliation/runs/${run.id}`, { method: "DELETE" });
+                                if (res.ok) {
+                                  setRuns((prev) => prev.filter((r) => r.id !== run.id));
+                                  fetchQueue(queuePeriod);
+                                } else {
+                                  alert("Failed to delete run");
+                                }
+                              }}
+                              className="rounded border border-red-300 px-3 py-1 text-xs font-medium text-red-500 hover:bg-red-50 transition-colors"
+                            >
+                              Delete
+                            </button>
                           </div>
                         )}
                       </div>

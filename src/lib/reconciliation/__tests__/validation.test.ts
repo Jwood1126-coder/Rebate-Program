@@ -869,7 +869,7 @@ describe('case-insensitive item matching', () => {
     // Should NOT produce CLM-006 (unknown item) — the item was found
     const issueCreateCall = mockPrisma.reconciliationIssue.createMany.mock.calls[0]?.[0];
     const issues = issueCreateCall?.data || [];
-    const clm006Issues = issues.filter((i: { code: string }) => i.code === EXCEPTION_CODES.UNKNOWN_ITEM);
+    const clm006Issues = issues.filter((i: { code: string }) => i.code === EXCEPTION_CODES.CLM_006);
     expect(clm006Issues).toHaveLength(0);
   });
 
@@ -902,7 +902,7 @@ describe('case-insensitive item matching', () => {
     // No CLM-006 errors
     const issueCreateCall = mockPrisma.reconciliationIssue.createMany.mock.calls[0]?.[0];
     const issues = issueCreateCall?.data || [];
-    const clm006Issues = issues.filter((i: { code: string }) => i.code === EXCEPTION_CODES.UNKNOWN_ITEM);
+    const clm006Issues = issues.filter((i: { code: string }) => i.code === EXCEPTION_CODES.CLM_006);
     expect(clm006Issues).toHaveLength(0);
   });
 });

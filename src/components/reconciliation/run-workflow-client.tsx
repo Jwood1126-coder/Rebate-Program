@@ -346,12 +346,28 @@ export default function RunWorkflowClient({ run: initialRun, currentStep: initia
             {run.posBatch && <span className="ml-2 text-indigo-500">+ POS: {run.posBatch.fileName}</span>}
           </p>
         </div>
-        <Link
-          href="/reconciliation"
-          className="rounded-lg border border-brennan-border bg-white px-3 py-1.5 text-xs font-medium text-brennan-text hover:bg-brennan-light"
-        >
-          Back to Checklist
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/reconciliation"
+            className="rounded-lg border border-brennan-border bg-white px-3 py-1.5 text-xs font-medium text-brennan-text hover:bg-brennan-light"
+          >
+            Back to Checklist
+          </Link>
+          <button
+            onClick={async () => {
+              if (!confirm(`Delete this reconciliation run? This removes the run record but does NOT undo any committed changes to master data.`)) return;
+              const res = await fetch(`/api/reconciliation/runs/${run.id}`, { method: "DELETE" });
+              if (res.ok) {
+                window.location.href = "/reconciliation";
+              } else {
+                alert("Failed to delete run");
+              }
+            }}
+            className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50"
+          >
+            Delete Run
+          </button>
+        </div>
       </div>
 
       {/* Stepper */}
