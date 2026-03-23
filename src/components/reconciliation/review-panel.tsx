@@ -781,8 +781,9 @@ function MatchedRowsSection({ rows }: { rows: MatchedRow[] }) {
                 <th className="px-4 py-2">Row</th>
                 <th className="px-3 py-2">Item</th>
                 <th className="px-3 py-2">Contract</th>
-                <th className="px-3 py-2 text-right">Price</th>
+                <th className="px-3 py-2 text-right">Rebate Price</th>
                 <th className="px-3 py-2 text-right">Qty</th>
+                <th className="px-3 py-2">Date</th>
                 <th className="px-3 py-2">Status</th>
               </tr>
             </thead>
@@ -797,6 +798,9 @@ function MatchedRowsSection({ rows }: { rows: MatchedRow[] }) {
                   </td>
                   <td className="px-3 py-1.5 text-right text-gray-600">
                     {row.quantity ? Number(row.quantity).toLocaleString() : "—"}
+                  </td>
+                  <td className="px-3 py-1.5 text-gray-400">
+                    {row.transactionDate ?? "—"}
                   </td>
                   <td className="px-3 py-1.5">
                     <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">OK</span>

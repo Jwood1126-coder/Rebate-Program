@@ -4,6 +4,49 @@ All notable changes to this project are documented in this file, grouped by sess
 
 ---
 
+## 2026-03-23 — Critical Audit Fixes, Standard Price, Contract Edit, Approval Removal
+
+### Critical Bug Fixes
+- **Case-insensitive item matching**: Reconciliation now uses Prisma `mode: 'insensitive'` for item DB queries + uppercase Map keys. Fixes false CLM-006 errors when claim files use different casing than DB items.
+- **Date comparison normalization**: `stripTime()` applied to transaction/contract date comparisons in reconciliation. Prevents false CLM-007 errors from time-component mismatches.
+- **Contract detail state fixes**: Replaced unsafe `document.getElementById` with React state; fixed prop mutation on end user creation.
+
+### Security Hardening
+- NaN validation added to all record API routes
+- Auth checks added to audit log and column-mapping GET routes
+- CSV formula injection protection (escapes `=`, `+`, `-`, `@` prefixes)
+- Record note creation now audit-logged
+
+### Standard Price Field
+- New `standardPrice` (DECIMAL(12,4), nullable) on rebate records
+- Extracted from Fastenal SPA column F (Standard Price) during import
+- Shown on contract detail table alongside Rebate Price
+- Carried through contract update supersession chain
+
+### Contract Edit & Approval Changes
+- Edit button on contract detail: inline editing for End User, Customer #, Description
+- Create new end user from edit dropdown
+- **Approval workflow removed**: contracts default to `active` on creation
+- Legacy `pending_review` contracts auto-fixed to active on Railway boot
+
+### Price & Label Consistency
+- All prices displayed as 2 decimal places ($X.XX)
+- "Rebate Price" label standardized across all UI surfaces
+- Shared `pricesEqual()` utility in `src/lib/utils/prices.ts`
+- Fastenal SPA export replaced with stored document download
+
+### Reconciliation Improvements
+- Matched rows shown alongside exceptions (green collapsible section)
+- Contract grouping in review panel
+- Column mapping always shown before upload
+
+### Other
+- "Last Changed" column on contract detail records table
+- Superseded records hidden by default (toggle to show)
+- 350 tests passing, TypeScript clean
+
+---
+
 ## 2026-03-19 — Contract File Storage, Fastenal Test Data, File Hardening
 
 ### Contract File Storage (Schema Change)
