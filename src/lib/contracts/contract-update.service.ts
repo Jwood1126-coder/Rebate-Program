@@ -25,6 +25,7 @@ import {
 } from "@/lib/constants/statuses";
 import type { FileMode } from "@/lib/constants/statuses";
 import crypto from "crypto";
+import { pricesEqual } from "@/lib/utils/prices";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -437,10 +438,7 @@ async function loadActiveRecords(planIds: number[]): Promise<ExistingRecord[]> {
   }));
 }
 
-/** Round to DB precision (DECIMAL(12,4)) for truthful comparison. */
-function pricesEqual(dbPrice: number, filePrice: number): boolean {
-  return Math.round(dbPrice * 10000) === Math.round(filePrice * 10000);
-}
+// pricesEqual is imported from @/lib/utils/prices
 
 /**
  * Match a file row to the best existing record.

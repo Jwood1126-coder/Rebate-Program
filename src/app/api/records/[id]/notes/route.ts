@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db/client";
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth/session";
 import { canEdit } from "@/lib/auth/roles";
+import { auditService } from "@/lib/audit/audit.service";
 
 export async function GET(
   request: NextRequest,
@@ -11,7 +12,8 @@ export async function GET(
   if ("error" in result) return result.error;
 
   const { id } = await params;
-  const recordId = parseInt(id);
+  const recordId = Number(id);
+  if (isNaN(recordId)) return NextResponse.json({ error: "Invalid record ID" }, { status: 400 });
 
   const record = await prisma.rebateRecord.findUnique({ where: { id: recordId } });
   if (!record) {
@@ -42,7 +44,8 @@ export async function POST(
   }
 
   const { id } = await params;
-  const recordId = parseInt(id);
+  const recordId = Number(id);
+  if (isNaN(recordId)) return NextResponse.json({ error: "Invalid record ID" }, { status: 400 });
   const body = await request.json();
 
   const record = await prisma.rebateRecord.findUnique({ where: { id: recordId } });
@@ -68,6 +71,13 @@ export async function POST(
       createdBy: { select: { displayName: true, username: true } },
     },
   });
+
+  await auditService.logCreate(
+    "record_notes",
+    note.id,
+    { rebateRecordId: recordId, noteText, noteType },
+    user.id,
+  );
 
   return NextResponse.json(note, { status: 201 });
 }

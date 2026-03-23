@@ -172,13 +172,21 @@ export async function GET(request: NextRequest) {
  * commas, quotes, or newlines. Doubles internal quotes per RFC 4180.
  */
 function csvEscape(value: string): string {
-  if (
-    value.includes(",") ||
-    value.includes('"') ||
-    value.includes("\n") ||
-    value.includes("\r")
-  ) {
-    return `"${value.replace(/"/g, '""')}"`;
+  // Prevent spreadsheet formula injection: if the value starts with a character
+  // that spreadsheet applications interpret as a formula, prepend a single quote
+  // to neutralize it. This protects against =, +, -, and @ injection vectors.
+  let safe = value;
+  if (/^[=+\-@]/.test(safe)) {
+    safe = "'" + safe;
   }
-  return value;
+
+  if (
+    safe.includes(",") ||
+    safe.includes('"') ||
+    safe.includes("\n") ||
+    safe.includes("\r")
+  ) {
+    return `"${safe.replace(/"/g, '""')}"`;
+  }
+  return safe;
 }

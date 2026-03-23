@@ -12,8 +12,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const recordId = Number(id);
+  if (isNaN(recordId)) return NextResponse.json({ error: "Invalid record ID" }, { status: 400 });
+
   const record = await prisma.rebateRecord.findUnique({
-    where: { id: parseInt(id) },
+    where: { id: recordId },
     include: {
       rebatePlan: {
         include: {
@@ -48,7 +51,8 @@ export async function PUT(
   }
 
   const { id } = await params;
-  const recordId = parseInt(id);
+  const recordId = Number(id);
+  if (isNaN(recordId)) return NextResponse.json({ error: "Invalid record ID" }, { status: 400 });
   const body = await request.json();
 
   const existing = await prisma.rebateRecord.findUnique({ where: { id: recordId } });
@@ -175,7 +179,8 @@ export async function DELETE(
   }
 
   const { id } = await params;
-  const recordId = parseInt(id);
+  const recordId = Number(id);
+  if (isNaN(recordId)) return NextResponse.json({ error: "Invalid record ID" }, { status: 400 });
 
   const existing = await prisma.rebateRecord.findUnique({ where: { id: recordId } });
   if (!existing) {

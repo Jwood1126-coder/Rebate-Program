@@ -14,6 +14,7 @@
 import { prisma } from '@/lib/db/client';
 import { EXCEPTION_CODES, RUN_STATUSES, PRICE_MATCH_TOLERANCE } from './types';
 import { RECORD_STATUSES } from '@/lib/constants/statuses';
+import { stripTime } from '@/lib/utils/dates';
 import type { Prisma } from '@prisma/client';
 
 export interface ValidationResult {
@@ -147,28 +148,31 @@ export async function validateRun(runId: number): Promise<ValidationResult> {
       });
     } else {
       // --- CLM-007: Contract Expired / Not Yet Effective ---
+      // Strip time components to avoid false positives when contract dates
+      // (date-only) are compared against transaction dates that may carry times.
       if (transactionDate) {
+        const txDate = stripTime(transactionDate);
         if (contract.endDate) {
-          const contractEnd = new Date(contract.endDate);
-          if (transactionDate > contractEnd) {
+          const contractEnd = stripTime(new Date(contract.endDate));
+          if (txDate > contractEnd) {
             rowIssues.push({
               code: EXCEPTION_CODES.CLM_007,
               severity: 'error',
               category: 'Contract Expired',
-              description: `Contract "${contractNumber}" expired ${contractEnd.toISOString().split('T')[0]}. Transaction date: ${transactionDate.toISOString().split('T')[0]}.`,
+              description: `Contract "${contractNumber}" expired ${contractEnd.toISOString().split('T')[0]}. Transaction date: ${txDate.toISOString().split('T')[0]}.`,
               rowNumber: row.rowNumber,
               suggestedAction: 'reject',
             });
           }
         }
         if (contract.startDate) {
-          const contractStart = new Date(contract.startDate);
-          if (transactionDate < contractStart) {
+          const contractStart = stripTime(new Date(contract.startDate));
+          if (txDate < contractStart) {
             rowIssues.push({
               code: EXCEPTION_CODES.CLM_007,
               severity: 'error',
               category: 'Contract Not Yet Effective',
-              description: `Contract "${contractNumber}" starts ${contractStart.toISOString().split('T')[0]}. Transaction date: ${transactionDate.toISOString().split('T')[0]}.`,
+              description: `Contract "${contractNumber}" starts ${contractStart.toISOString().split('T')[0]}. Transaction date: ${txDate.toISOString().split('T')[0]}.`,
               rowNumber: row.rowNumber,
               suggestedAction: 'reject',
             });
@@ -178,7 +182,9 @@ export async function validateRun(runId: number): Promise<ValidationResult> {
     }
 
     // --- CLM-006: Unknown Item ---
-    const item = refData.itemsByNumber.get(itemNumber);
+    // Case-insensitive lookup — item numbers in the DB have a unique constraint
+    // on the raw value, but claim files may use different casing.
+    const item = refData.itemsByNumber.get(itemNumber.toUpperCase());
     if (!item) {
       rowIssues.push({
         code: EXCEPTION_CODES.CLM_006,
@@ -266,6 +272,8 @@ export async function validateRun(runId: number): Promise<ValidationResult> {
         matched = true;
 
         // CLM-001: Price Mismatch
+        // Uses PRICE_TOLERANCE ($0.01) rather than exact pricesEqual() because
+        // claim files often carry rounding differences from distributor systems.
         if (deviatedPrice !== null) {
           const contractPrice = Number(record.rebatePrice);
           const priceDiff = Math.abs(deviatedPrice - contractPrice);
@@ -656,15 +664,21 @@ async function loadReferenceData(
     contractsByNumberAll.set(c.contractNumber, list);
   }
 
-  // Load only the items referenced in this run for the same reason.
+  // Load items referenced in this run — case-insensitive to handle claim files
+  // that may use different casing than the canonical DB item numbers.
   const items = itemNumbers.length === 0
     ? []
     : await prisma.item.findMany({
-        where: { itemNumber: { in: itemNumbers } },
+        where: { itemNumber: { in: itemNumbers, mode: "insensitive" } },
         select: { id: true, itemNumber: true },
       });
+  // Key by uppercase for case-insensitive matching against claim rows.
+  // The DB unique constraint on itemNumber is case-sensitive, but in practice
+  // item numbers are stored in a single canonical case. If two items ever
+  // differ only by case this would conflate them — but that scenario is
+  // prevented by business convention and import normalization.
   const itemsByNumber = new Map(
-    items.map(i => [i.itemNumber, i])
+    items.map(i => [i.itemNumber.toUpperCase(), i])
   );
 
   const contractIds = contracts.map(c => c.id);

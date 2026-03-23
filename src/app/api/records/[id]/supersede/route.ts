@@ -23,7 +23,8 @@ export async function POST(
   }
 
   const { id } = await params;
-  const recordId = parseInt(id);
+  const recordId = Number(id);
+  if (isNaN(recordId)) return NextResponse.json({ error: "Invalid record ID" }, { status: 400 });
   const body = await request.json();
 
   // Load the record being superseded

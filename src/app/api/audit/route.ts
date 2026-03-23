@@ -1,7 +1,11 @@
 import { prisma } from "@/lib/db/client";
 import { NextRequest, NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/auth/session";
 
 export async function GET(request: NextRequest) {
+  const result = await getSessionUser();
+  if ("error" in result) return result.error;
+
   const { searchParams } = new URL(request.url);
   const action = searchParams.get("action");
   const tableName = searchParams.get("table");

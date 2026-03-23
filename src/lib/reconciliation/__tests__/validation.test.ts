@@ -632,7 +632,7 @@ describe('validateRun effective-date matching', () => {
     });
 
     expect(mockPrisma.item.findMany).toHaveBeenCalledWith({
-      where: { itemNumber: { in: ['6801-12-12-NWO-FG'] } },
+      where: { itemNumber: { in: ['6801-12-12-NWO-FG'], mode: 'insensitive' } },
       select: { id: true, itemNumber: true },
     });
 
@@ -828,5 +828,81 @@ describe('validateRun effective-date matching', () => {
         data: expect.objectContaining({ matchedRecordId: 20 }),
       })
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Case-insensitive item matching
+// ---------------------------------------------------------------------------
+
+describe('case-insensitive item matching', () => {
+  it('matches lowercase claim item against uppercase DB item', async () => {
+    // DB item stored as uppercase
+    const item = makeItem({ id: 5, itemNumber: 'ABC-123' });
+    // Claim uses lowercase
+    const row = makeClaimRow({ id: 1, itemNumber: 'abc-123', contractNumber: '100884' });
+
+    vi.clearAllMocks();
+    mockPrisma.reconciliationRun.findUnique.mockResolvedValue(makeRun());
+    mockPrisma.reconciliationRun.update.mockResolvedValue({});
+    mockPrisma.claimRow.findMany.mockResolvedValue([row]);
+    mockPrisma.claimRow.update.mockResolvedValue({});
+    mockPrisma.contract.findMany.mockResolvedValue([makeContract()]);
+    mockPrisma.item.findMany.mockResolvedValue([item]);
+    mockPrisma.rebateRecord.findMany.mockResolvedValue([
+      makeRebateRecord({ id: 10, itemId: 5 }),
+    ]);
+    mockPrisma.reconciliationIssue.deleteMany.mockResolvedValue({});
+    mockPrisma.reconciliationIssue.createMany.mockResolvedValue({ count: 0 });
+
+    await validateRun(1);
+
+    // Verify item query used insensitive mode
+    expect(mockPrisma.item.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          itemNumber: expect.objectContaining({ mode: 'insensitive' }),
+        }),
+      })
+    );
+
+    // Should NOT produce CLM-006 (unknown item) — the item was found
+    const issueCreateCall = mockPrisma.reconciliationIssue.createMany.mock.calls[0]?.[0];
+    const issues = issueCreateCall?.data || [];
+    const clm006Issues = issues.filter((i: { code: string }) => i.code === EXCEPTION_CODES.UNKNOWN_ITEM);
+    expect(clm006Issues).toHaveLength(0);
+  });
+
+  it('matches mixed-case claim item against canonical DB item', async () => {
+    const item = makeItem({ id: 5, itemNumber: '6801-12-12-NWO-FG' });
+    const row = makeClaimRow({ id: 1, itemNumber: '6801-12-12-nwo-fg' });
+
+    vi.clearAllMocks();
+    mockPrisma.reconciliationRun.findUnique.mockResolvedValue(makeRun());
+    mockPrisma.reconciliationRun.update.mockResolvedValue({});
+    mockPrisma.claimRow.findMany.mockResolvedValue([row]);
+    mockPrisma.claimRow.update.mockResolvedValue({});
+    mockPrisma.contract.findMany.mockResolvedValue([makeContract()]);
+    mockPrisma.item.findMany.mockResolvedValue([item]);
+    mockPrisma.rebateRecord.findMany.mockResolvedValue([
+      makeRebateRecord({ id: 10, itemId: 5 }),
+    ]);
+    mockPrisma.reconciliationIssue.deleteMany.mockResolvedValue({});
+    mockPrisma.reconciliationIssue.createMany.mockResolvedValue({ count: 0 });
+
+    await validateRun(1);
+
+    // Verify insensitive mode used
+    expect(mockPrisma.item.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { itemNumber: expect.objectContaining({ mode: 'insensitive' }) },
+      })
+    );
+
+    // No CLM-006 errors
+    const issueCreateCall = mockPrisma.reconciliationIssue.createMany.mock.calls[0]?.[0];
+    const issues = issueCreateCall?.data || [];
+    const clm006Issues = issues.filter((i: { code: string }) => i.code === EXCEPTION_CODES.UNKNOWN_ITEM);
+    expect(clm006Issues).toHaveLength(0);
   });
 });
