@@ -57,6 +57,7 @@ export default async function ContractDetailPage({
       rawStartDate: r.startDate.toISOString().split("T")[0],
       rawEndDate: r.endDate ? r.endDate.toISOString().split("T")[0] : null,
       status: deriveRecordStatus(r.startDate, r.endDate, r.supersededById, r.status),
+      updatedAt: formatDate(r.updatedAt),
     })),
   }));
 

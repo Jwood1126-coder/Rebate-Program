@@ -234,7 +234,7 @@ export function RecordDetailClient({
           <div>
             <p className="text-xs font-medium text-gray-400 uppercase">Rebate Price</p>
             <p className="mt-0.5 text-2xl font-bold text-brennan-text font-mono">
-              ${Number(record.rebatePrice).toFixed(4)}
+              ${Number(record.rebatePrice).toFixed(2)}
             </p>
           </div>
           <div>
@@ -555,7 +555,7 @@ function ChainNode({ rec, isCurrent }: { rec: ChainRecord; isCurrent: boolean })
         </span>
       </div>
       <p className="mt-1 text-sm font-bold font-mono text-brennan-text">
-        ${Number(rec.rebatePrice).toFixed(4)}
+        ${Number(rec.rebatePrice).toFixed(2)}
       </p>
       <p className="text-[10px] text-gray-500">
         {rec.startDate} → {rec.endDate || "Open"}

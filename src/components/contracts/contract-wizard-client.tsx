@@ -243,6 +243,41 @@ function UploadMode({
         // Apply suggestions
         setItemNumberColumn(data.suggestedMapping?.itemNumberColumn || "");
         setPriceColumn(data.suggestedMapping?.priceColumn || "");
+
+        // Auto-populate from Fastenal SPA metadata
+        if (data.fastenalSPA && data.spaMetadata) {
+          const meta = data.spaMetadata;
+          // Auto-select FAS distributor
+          const fasDistributor = distributors.find(d => d.code === "FAS");
+          if (fasDistributor) setDistributorId(String(fasDistributor.id));
+
+          // Auto-match end user by name (case-insensitive)
+          if (meta.endUser) {
+            const matched = localEndUsers.find(
+              eu => eu.name.toLowerCase() === meta.endUser.toLowerCase()
+            );
+            if (matched) {
+              setEndUserId(String(matched.id));
+            } else {
+              // Pre-fill the "create end user" fields
+              setNewEndUserName(meta.endUser);
+              setNewEndUserCode(meta.endUser.toUpperCase().replace(/[^A-Z0-9]/g, "").substring(0, 10));
+            }
+          }
+
+          // Auto-fill effective date
+          if (meta.effectiveDate) {
+            try {
+              const d = new Date(meta.effectiveDate);
+              if (!isNaN(d.getTime())) {
+                setStartDate(d.toISOString().split("T")[0]);
+              }
+            } catch { /* ignore bad dates */ }
+          }
+
+          // Auto-fill contract type as evergreen (Fastenal SPAs are typically evergreen)
+          setContractType("evergreen");
+        }
       }
     } catch {
       setError("Network error reading file.");

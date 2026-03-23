@@ -30,6 +30,7 @@ interface RecordRow {
   rawStartDate: string;
   rawEndDate: string | null;
   status: string;
+  updatedAt: string;
 }
 
 interface PlanData {
@@ -706,9 +707,10 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
                   <th className="px-4 py-2">Item #</th>
                   <th className="px-3 py-2">Description</th>
                   {isMultiPlan && <th className="px-3 py-2">Plan</th>}
-                  <th className="px-3 py-2 text-right">Price</th>
+                  <th className="px-3 py-2 text-right">Rebate Price</th>
                   <th className="px-3 py-2">Start</th>
                   <th className="px-3 py-2">End</th>
+                  <th className="px-3 py-2">Last Changed</th>
                   <th className="px-3 py-2">Status</th>
                 </tr>
               </thead>
@@ -734,12 +736,13 @@ export function ContractDetailClient({ contract, plans, totalRecords, statusCoun
                         </td>
                       )}
                       <td className="px-3 py-1.5 text-right font-mono text-gray-700">
-                        ${Number(r.rebatePrice).toFixed(4)}
+                        ${Number(r.rebatePrice).toFixed(2)}
                       </td>
                       <td className="px-3 py-1.5 text-gray-600">{r.startDate}</td>
                       <td className="px-3 py-1.5 text-gray-600">
                         {r.endDate || <span className="text-amber-500">Open</span>}
                       </td>
+                      <td className="px-3 py-1.5 text-gray-400 text-[10px]">{r.updatedAt}</td>
                       <td className="px-3 py-1.5">
                         <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[r.status] || "bg-gray-100 text-gray-600"}`}>
                           {r.status}

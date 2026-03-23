@@ -484,7 +484,7 @@ function RecordsPageInner({
               <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Plan</th>
               <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">End User</th>
               <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Item #</th>
-              <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">Price</th>
+              <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">Rebate Price</th>
               <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Start</th>
               <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">End</th>
               <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Status</th>
@@ -538,7 +538,7 @@ function RecordsPageInner({
                     {r.itemNumber}
                   </button>
                 </td>
-                <td className="px-3 py-2 text-right text-sm font-medium text-brennan-text">${r.rebatePrice}</td>
+                <td className="px-3 py-2 text-right text-sm font-medium text-brennan-text">${Number(r.rebatePrice).toFixed(2)}</td>
                 <td className="px-3 py-2 text-xs text-gray-500">{r.startDate}</td>
                 <td className="px-3 py-2 text-xs text-gray-500">{r.endDate || <span className="text-amber-500">Open</span>}</td>
                 <td className="px-3 py-2"><StatusBadge status={r.status} /></td>

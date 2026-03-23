@@ -483,12 +483,12 @@ export function ContractUpdateReviewClient({
                     <tr key={row.key} className={`${statusBg[row.status]} ${isResolved ? "opacity-60" : ""}`}>
                       <td className="px-5 py-2 font-mono font-medium text-brennan-text">{row.itemNumber}</td>
                       <td className={`px-3 py-2 text-right font-mono ${row.status === "changed" ? "line-through text-gray-400" : row.currentPrice != null ? "text-gray-600" : "text-gray-300"}`}>
-                        {row.currentPrice != null ? `$${row.currentPrice.toFixed(4)}` : "—"}
+                        {row.currentPrice != null ? `$${row.currentPrice.toFixed(2)}` : "—"}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
                         {row.newPrice != null ? (
                           <span className={`font-medium ${row.status === "changed" ? "text-amber-700" : row.status === "added" ? "text-emerald-700" : "text-gray-700"}`}>
-                            ${row.newPrice.toFixed(4)}
+                            ${row.newPrice.toFixed(2)}
                           </span>
                         ) : row.status === "removed" ? (
                           <span className="text-red-400 italic">—</span>

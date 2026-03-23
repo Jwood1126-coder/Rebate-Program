@@ -748,7 +748,8 @@ export function readContractFileHeaders(
 export function parseSimpleContractFile(
   fileBuffer: Buffer,
   fileName: string,
-  columnMapping?: ContractColumnMapping
+  columnMapping?: ContractColumnMapping,
+  contractNumber?: string,
 ): SimpleParseResult {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -767,7 +768,21 @@ export function parseSimpleContractFile(
 
   // Detect Fastenal SPA format — use dedicated parser
   if (isFastenalSPA(worksheet)) {
-    return parseSPALineItems(worksheet);
+    const spaMetadata = extractSPAMetadata(worksheet);
+    const parsed = parseSPALineItems(worksheet);
+
+    // Validate Agreement # matches the contract being updated
+    if (contractNumber && spaMetadata.agreementNumber) {
+      const spaAgreement = spaMetadata.agreementNumber.trim();
+      const contractNum = contractNumber.trim();
+      if (spaAgreement !== contractNum) {
+        parsed.warnings.unshift(
+          `Agreement # on SPA form (${spaAgreement}) does not match contract number (${contractNum}). Please verify this is the correct file.`
+        );
+      }
+    }
+
+    return parsed;
   }
 
   const rawRows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(worksheet, {

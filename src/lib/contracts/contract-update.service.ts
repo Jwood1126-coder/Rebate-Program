@@ -96,7 +96,9 @@ export async function stageContractUpdate(
   // 1. Validate contract exists
   const contract = await prisma.contract.findUnique({
     where: { id: input.contractId },
-    include: {
+    select: {
+      id: true,
+      contractNumber: true,
       rebatePlans: {
         where: { status: "active" },
         select: { id: true, planCode: true },
@@ -114,7 +116,7 @@ export async function stageContractUpdate(
   }
 
   // 2. Parse the file
-  const parseResult = parseSimpleContractFile(fileBuffer, fileName, input.columnMapping);
+  const parseResult = parseSimpleContractFile(fileBuffer, fileName, input.columnMapping, contract.contractNumber);
   if (parseResult.items.length === 0) {
     return fail(parseResult.errors.length > 0 ? parseResult.errors : ["File contains no valid rows."]);
   }
@@ -429,6 +431,11 @@ async function loadActiveRecords(planIds: number[]): Promise<ExistingRecord[]> {
   }));
 }
 
+/** Round to DB precision (DECIMAL(12,4)) for truthful comparison. */
+function pricesEqual(dbPrice: number, filePrice: number): boolean {
+  return Math.round(dbPrice * 10000) === Math.round(filePrice * 10000);
+}
+
 /**
  * Match a file row to the best existing record.
  *
@@ -454,7 +461,7 @@ function matchRecord(
     const rec = records.find(r => r.rebatePlanId === targetPlanId) || records[0];
     return {
       record: rec,
-      priceChanged: rec.rebatePrice !== newPrice,
+      priceChanged: !pricesEqual(rec.rebatePrice, newPrice),
       matchStatus: MATCH_STATUSES.AUTO,
       ambiguityReason: null,
     };
@@ -466,7 +473,7 @@ function matchRecord(
     if (rec) {
       return {
         record: rec,
-        priceChanged: rec.rebatePrice !== newPrice,
+        priceChanged: !pricesEqual(rec.rebatePrice, newPrice),
         matchStatus: MATCH_STATUSES.AUTO,
         ambiguityReason: null,
       };
@@ -480,7 +487,7 @@ function matchRecord(
     const rec = records[0];
     return {
       record: rec,
-      priceChanged: rec.rebatePrice !== newPrice,
+      priceChanged: !pricesEqual(rec.rebatePrice, newPrice),
       matchStatus: MATCH_STATUSES.AUTO,
       ambiguityReason: null,
     };
@@ -490,7 +497,7 @@ function matchRecord(
   const planCodes = [...new Set(records.map(r => r.planCode))].join(", ");
   return {
     record: records[0], // pick first as provisional
-    priceChanged: records[0].rebatePrice !== newPrice,
+    priceChanged: !pricesEqual(records[0].rebatePrice, newPrice),
     matchStatus: MATCH_STATUSES.AMBIGUOUS,
     ambiguityReason: `Item exists in multiple plans: ${planCodes}`,
   };

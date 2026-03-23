@@ -565,16 +565,16 @@ function IssueTypeDetail({ issue }: { issue: DbIssue }) {
           <div className="flex items-center gap-3">
             <div className="rounded border border-gray-200 bg-white px-3 py-1.5 text-center">
               <div className="text-[10px] text-gray-400 uppercase">Contract</div>
-              <div className="text-sm font-semibold text-gray-700">${oldPrice.toFixed(4)}</div>
+              <div className="text-sm font-semibold text-gray-700">${oldPrice.toFixed(2)}</div>
             </div>
             <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
             </svg>
             <div className="rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-center">
               <div className="text-[10px] text-amber-600 uppercase">Claimed</div>
-              <div className="text-sm font-semibold text-amber-700">${newPrice.toFixed(4)}</div>
+              <div className="text-sm font-semibold text-amber-700">${newPrice.toFixed(2)}</div>
             </div>
-            <div className="text-xs text-gray-400">diff ${Math.abs(newPrice - oldPrice).toFixed(4)}</div>
+            <div className="text-xs text-gray-400">diff ${Math.abs(newPrice - oldPrice).toFixed(2)}</div>
           </div>
         )}
         {issue.masterRecordId && (
@@ -598,7 +598,7 @@ function IssueTypeDetail({ issue }: { issue: DbIssue }) {
           {sd.contractId != null && <DetailField label="Contract ID" value={`#${sd.contractId}`} />}
           {sd.itemId != null && <DetailField label="Item ID" value={`#${sd.itemId}`} />}
           {sd.planId != null && <DetailField label="Target Plan" value={`#${sd.planId}`} />}
-          {sd.claimedPrice != null && <DetailField label="Claimed Price" value={`$${(sd.claimedPrice as number).toFixed(4)}`} />}
+          {sd.claimedPrice != null && <DetailField label="Claimed Price" value={`$${(sd.claimedPrice as number).toFixed(2)}`} />}
           {candidatePlanIds && candidatePlanIds.length > 1 && (
             <DetailField label="Available Plans" value={candidatePlanIds.map(id => `#${id}`).join(", ")} />
           )}
@@ -616,7 +616,7 @@ function IssueTypeDetail({ issue }: { issue: DbIssue }) {
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
           <DetailField label="Item Number" value={sd.itemNumber as string | undefined} />
           {sd.contractNumber != null && <DetailField label="Contract" value={String(sd.contractNumber)} />}
-          {sd.claimedPrice != null && <DetailField label="Claimed Price" value={`$${(sd.claimedPrice as number).toFixed(4)}`} />}
+          {sd.claimedPrice != null && <DetailField label="Claimed Price" value={`$${(sd.claimedPrice as number).toFixed(2)}`} />}
         </dl>
         <p className="text-xs text-blue-600">
           If approved: create new item &quot;{String(sd.itemNumber)}&quot; + rebate record at claimed price
@@ -793,7 +793,7 @@ function MatchedRowsSection({ rows }: { rows: MatchedRow[] }) {
                   <td className="px-3 py-1.5 font-mono font-medium text-gray-700">{row.itemNumber ?? "—"}</td>
                   <td className="px-3 py-1.5 text-gray-600">{row.contractNumber ?? "—"}</td>
                   <td className="px-3 py-1.5 text-right font-mono text-gray-600">
-                    {row.deviatedPrice ? `$${Number(row.deviatedPrice).toFixed(4)}` : "—"}
+                    {row.deviatedPrice ? `$${Number(row.deviatedPrice).toFixed(2)}` : "—"}
                   </td>
                   <td className="px-3 py-1.5 text-right text-gray-600">
                     {row.quantity ? Number(row.quantity).toLocaleString() : "—"}

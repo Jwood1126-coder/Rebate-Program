@@ -103,7 +103,7 @@ export async function GET(
       cr?.contractNumber ?? "",
       issue.code,
       csvEscape(issue.description),
-      cr?.deviatedPrice != null ? cr.deviatedPrice.toFixed(4) : "",
+      cr?.deviatedPrice != null ? cr.deviatedPrice.toFixed(2) : "",
       cr?.quantity != null ? String(cr.quantity) : "",
       issue.resolution ? issue.resolution.charAt(0).toUpperCase() + issue.resolution.slice(1) : "Pending",
       csvEscape(issue.resolutionNote ?? ""),
